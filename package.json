@@ -1,6 +1,6 @@
 {
   "name": "bridgedesk",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "private": true,
   "description": "OpenRemote secure remote desktop",
   "author": "OpenRemote contributors",
@@ -10,6 +10,7 @@
     "node": ">=22.12.0"
   },
   "scripts": {
+    "postinstall": "node scripts/prepare-pty.cjs",
     "setup:electron": "install-electron",
     "prestart": "install-electron",
     "start": "electron .",
@@ -26,7 +27,10 @@
     "test:live": "node scripts/smoke-live-desktop.mjs"
   },
   "dependencies": {
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
     "https-proxy-agent": "7.0.6",
+    "node-pty": "1.1.0",
     "ws": "8.22.1"
   },
   "devDependencies": {
@@ -41,6 +45,9 @@
     "productName": "OpenRemote",
     "icon": "app/icon.png",
     "asar": true,
+    "npmRebuild": false,
+    "beforePack": "./scripts/prepare-pty.cjs",
+    "asarUnpack": ["node_modules/node-pty/**/*"],
     "directories": {
       "output": "dist/openremote"
     },
@@ -49,6 +56,11 @@
       "shared/**/*",
       "server/**/*",
       "!**/._*",
+      "!node_modules/node-pty/{src,scripts,typings,deps,third_party,build}/**/*",
+      "!node_modules/node-pty/prebuilds/{darwin-x64,win32-arm64}/**/*",
+      "!node_modules/node-pty/prebuilds/**/*.pdb",
+      "!node_modules/node-pty/lib/**/*.test.js",
+      "!node_modules/{@xterm/**,node-pty}/**/*.map",
       "package.json",
       "LICENSE",
       "NOTICE",
@@ -66,6 +78,7 @@
       }
     ],
     "mac": {
+      "files": ["!node_modules/node-pty/prebuilds/win32-x64/**/*"],
       "target": [
         {
           "target": "dmg",
@@ -100,6 +113,7 @@
       "sign": "scripts/sign-macos.cjs"
     },
     "win": {
+      "files": ["!node_modules/node-pty/prebuilds/darwin-arm64/**/*"],
       "target": [
         {
           "target": "nsis",

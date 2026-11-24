@@ -11,10 +11,10 @@
     constructor(...args) { super(...args); smoke.pcs.push(this); }
   };
   const names = ['snapshot', 'saveSettings', 'copyInvitation', 'copyPairCode', 'pair', 'pairMode', 'setSessionViewOnly',
-    'approvePair', 'rejectPair', 'retryPair', 'cancelPair', 'revoke', 'peerControl', 'connect', 'disconnect', 'pauseHosting', 'sessionFailed',
+    'approvePair', 'rejectPair', 'retryPair', 'cancelPair', 'revoke', 'peerControl', 'connect', 'connectTerminal', 'disconnect', 'pauseHosting', 'sessionFailed',
     'signal', 'captureSource', 'input', 'sessionConnected', 'sessionAlive', 'sessionStats', 'permissions',
     'openPermissions', 'listDisplays', 'startQuickConnect', 'stopQuickConnect', 'sessionReady', 'showSession', 'toggleFullscreen', 'exportConnection', 'importConnection',
-    'getSshProfile', 'openSsh'];
+    'getSshProfile', 'openSsh', 'localTerminalReady', 'localTerminalResize', 'localTerminalOutputReady'];
   window.bridge = Object.fromEntries(names.map(name => [name, (...args) => window.__smokeInvoke(name, args)]));
   window.bridge.onEvent = callback => {
     handlers.push(callback);
@@ -29,7 +29,12 @@
       canvas.width = 1280; canvas.height = 720;
       const ctx = canvas.getContext('2d');
       let frame = 0;
+      const terminal = constraints.video.mandatory.chromeMediaSource === 'tab';
       const draw = () => {
+        if (terminal && smoke.terminalFrame) {
+          ctx.drawImage(smoke.terminalFrame, 0, 0, canvas.width, canvas.height);
+          return;
+        }
         frame++;
         ctx.fillStyle = '#f3f8f3'; ctx.fillRect(0, 0, 1280, 720);
         ctx.fillStyle = '#173e2d'; ctx.fillRect(0, 0, 1280, 104);

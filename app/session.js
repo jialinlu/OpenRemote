@@ -11,6 +11,15 @@ function toast(message) { $('toast').textContent=String(message); $('toast').hid
 async function run(task) { try {return await task();} catch(error){toast(error.message);} }
 function render(next) {
   state = next;
+  if (next.session?.kind === 'terminal') {
+    if (!rtc) {
+      showSessionIdentity(next.session);
+      updateSessionView(next.session);
+    } else if (rtc.sessionId === next.session.sessionId && next.session.terminalAccepted && !rtc.terminalAccepted) {
+      rtc.terminalAccepted = true;
+      updateSessionView();
+    }
+  }
   if (rtc?.role === 'host' && next.session?.sessionId === rtc.sessionId &&
       applyInputPolicy(rtc, next.session)) sendHeartbeat(rtc);
 }
@@ -24,15 +33,27 @@ $('control-enabled').addEventListener('change', () => {
   releaseInput();
   updateSessionView();
 });
-function updateSessionView() {
-  const s = rtc;
+function showSessionIdentity(session) {
+  const terminal = session.kind === 'terminal';
+  const resource = terminal ? '远程终端' : '远程桌面';
+  document.title = resource + ' · OpenRemote';
+  $('viewport').setAttribute('aria-label', resource);
+  $('session-title').textContent = terminal ? resource + ' · ' + session.peerName : session.peerName;
+  $('session-title').title = $('session-title').textContent;
+  $('control-label').textContent = terminal ? '终端输入' : '键鼠控制';
+  $('host-banner').textContent = terminal ? '正在共享本机终端' : '正在共享本机桌面';
+}
+function updateSessionView(s = rtc) {
   const viewer = s?.role === 'viewer';
+  const terminal = s?.kind === 'terminal';
+  const resource = terminal ? '终端' : '桌面';
+  const waitingForOwner = terminal && viewer && !s.terminalAccepted && !s.connected;
   const hasVideo = viewer && $('remote-video').readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
   const ready = hasVideo && s.connected && s.channel?.readyState === 'open';
   const control = $('control-enabled');
   control.disabled = !ready || s.viewOnly;
   const controlling = ready && !s.viewOnly && control.checked;
-  $('viewport').classList.toggle('remote-pointer', !!controlling);
+  $('viewport').classList.toggle('remote-pointer', !!controlling && !terminal);
   $('keyboard-input').disabled = !controlling;
   $('fullscreen').disabled = !viewer;
   $('video-placeholder').hidden = !!hasVideo && !s.recovering;
@@ -41,24 +62,29 @@ function updateSessionView() {
     label = '未连接';
     status = '等待建立会话。';
   } else if (s.recovering) {
-    mode = 'reconnecting'; label = '重连中'; status = '网络中断，键鼠输入已暂停。';
+    mode = 'reconnecting'; label = '重连中'; status = '网络中断，远程输入已暂停。';
   } else if (!viewer && s.connected) {
-    mode = 'sharing'; label = '正在共享'; status = '对方已连接本机桌面。';
+    mode = 'sharing'; label = '正在共享'; status = '对方已连接本机' + resource + '。';
   } else if (ready) {
     mode = controlling ? 'control' : 'read-only';
     label = controlling ? '可控制' : '只读';
-    status = s.viewOnly ? '对方仅允许观看，本次键鼠权限由对方管理。' :
-      controlling ? '点击画面操作，可直接输入中文。' : '仅观看画面。开启键鼠控制即可操作。';
+    if (s.viewOnly) status = '对方仅允许观看，本次输入权限由对方管理。';
+    else if (terminal) status = controlling ? '点击终端可输入或粘贴文本。输入时，机主需将共享终端置于前台。' : '开启终端输入即可操作。';
+    else status = controlling ? '点击画面操作，可直接输入中文。' : '仅观看画面。开启键鼠控制即可操作。';
   } else if (viewer && hasVideo) {
-    status = '已收到画面，正在建立键鼠通道。';
+    status = '已收到画面，正在建立输入通道。';
+  } else if (waitingForOwner) {
+    label = '待确认'; status = '等待机主确认远程终端请求…';
   } else {
-    status = viewer ? '等待远端准备桌面…' : '正在准备共享本机桌面…';
+    status = viewer ? '等待远端准备' + resource + '…' : '正在准备共享本机' + resource + '…';
   }
   $('session-role').dataset.mode = mode;
   $('session-role').textContent = label;
   $('session-status').textContent = status;
-  $('placeholder-title').textContent = s?.recovering ? '正在恢复连接' : '正在进入远程桌面';
-  $('placeholder-message').textContent = s?.recovering ? '连接恢复后会继续显示远端画面。' : '正在等待远端画面。';
+  $('session-status').title = status;
+  $('placeholder-title').textContent = s?.recovering ? '正在恢复连接' : waitingForOwner ? '等待机主确认' : '正在进入远程' + resource;
+  $('placeholder-message').textContent = s?.recovering ? '连接恢复后会继续显示远端画面。' :
+    waitingForOwner ? '机主同意后，此处将显示对方的专用终端窗口。' : '正在等待远端画面。';
 }
 function isCurrent(s) { return rtc === s && !s.closed && !s.failing; }
 function applyInputPolicy(s, policy) {
@@ -116,8 +142,8 @@ async function startRtc(details) {
   s.viewOnly = policy.viewOnly === true;
   s.inputRevision = policy.inputRevision ?? 0;
   rtc = s;
-  $('session-title').textContent = details.peerName;
-  $('session-title').title = details.peerName;
+  showSessionIdentity(s);
+  $('control-enabled').checked = !s.viewOnly;
   $('bitrate-label').textContent = details.role === 'viewer' ? '接收码率' : '发送码率';
   $('host-banner').hidden = details.role !== 'host';
   updateSessionView();
@@ -156,10 +182,12 @@ async function startRtc(details) {
       return fail(s, code || 'capture-failed');
     }
     if (!isCurrent(s)) return;
+    const terminal = s.kind === 'terminal';
+    if (terminal && (source?.mediaSource !== 'tab' || !source.id)) return fail(s, 'source-missing');
     const profile = profiles[s.settings.quality];
     let stream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: source.id, maxWidth: Math.min(source.width, profile.width), maxHeight: Math.min(source.height, profile.height), maxFrameRate: profile.fps } } });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { mandatory: { chromeMediaSource: terminal ? 'tab' : 'desktop', chromeMediaSourceId: source.id, maxWidth: Math.min(source.width, profile.width), maxHeight: Math.min(source.height, profile.height), maxFrameRate: profile.fps } } });
     } catch (error) {
       return fail(s, ['NotAllowedError', 'SecurityError'].includes(error.name) ? 'capture-permission' : 'capture-failed');
     }
@@ -230,8 +258,11 @@ async function acceptSignal(message) {
   s.negotiation = s.negotiation.then(async () => {
     if (!isCurrent(s)) return;
     const { type, payload } = message;
-    if (type === 'session-accept' && s.role === 'viewer') await makeOffer(s);
-    else if (type === 'restart-request' && s.role === 'viewer') await makeOffer(s, true);
+    if (type === 'session-accept' && s.role === 'viewer') {
+      s.terminalAccepted = true;
+      updateSessionView();
+      await makeOffer(s);
+    } else if (type === 'restart-request' && s.role === 'viewer') await makeOffer(s, true);
     else if ((type === 'offer' && s.role === 'host') || (type === 'answer' && s.role === 'viewer')) {
       if (payload.description?.type !== type || typeof payload.description.sdp !== 'string' || payload.description.sdp.length > 90000) throw new Error('远端会话描述无效。');
       await s.pc.setRemoteDescription(payload.description);
@@ -315,7 +346,7 @@ function position(event) {
   return { type: 'move', x, y };
 }
 let lastMove = 0;
-$('viewport').addEventListener('pointermove', event => { if (performance.now() - lastMove < 16) return; const p = position(event); if (p) { sendInput(p); lastMove = performance.now(); } });
+$('viewport').addEventListener('pointermove', event => { if (rtc?.kind === 'terminal' || performance.now() - lastMove < 16) return; const p = position(event); if (p) { sendInput(p); lastMove = performance.now(); } });
 $('viewport').addEventListener('pointerdown', event => {
   const p = position(event), buttonName = ['left', 'middle', 'right'][event.button];
   if (!p || !buttonName || rtc?.role !== 'viewer') return;
@@ -325,6 +356,7 @@ $('viewport').addEventListener('pointerdown', event => {
   $('keyboard-input').style.left=Math.max(0,event.clientX-box.left)+'px';
   $('keyboard-input').style.top=Math.max(0,event.clientY-box.top)+'px';
   $('keyboard-input').focus({preventScroll:true});
+  if (rtc.kind === 'terminal') return;
   $('viewport').setPointerCapture(event.pointerId);
   capturedPointers.add(event.pointerId);
   sendInput(p); sendInput({ type: 'button', button: buttonName, state: 'down' });
@@ -364,7 +396,17 @@ keyboard.addEventListener('input',event=>{
  if(text && text!==compositionTail)sendInput({type:'text',text});
  compositionTail='';
 });
-keyboard.addEventListener('paste',event=>event.preventDefault());
+keyboard.addEventListener('paste', event => {
+  event.preventDefault();
+  if (rtc?.kind !== 'terminal' || keyboard.disabled || document.activeElement !== keyboard) return;
+  const text = event.clipboardData?.getData('text/plain');
+  if (!text) return;
+  if (text.includes('\0')) return toast('文本含有空字符，请移除后再粘贴。');
+  if (text.length > 16384 || new TextEncoder().encode(text).length > 16384 || JSON.stringify(text).length > 23000) {
+    return toast('文本过长，请分段粘贴，每次最多 16 KiB。');
+  }
+  sendInput({type:'text', text});
+});
 keyboard.addEventListener('drop',event=>event.preventDefault());
 for(const type of ['keydown','keyup'])keyboard.addEventListener(type,event=>{
  if(rtc?.role!=='viewer'||!$('control-enabled').checked)return;
@@ -384,6 +426,9 @@ for(const type of ['keydown','keyup'])keyboard.addEventListener(type,event=>{
      return;
    }
  }
+ // Let the local browser produce a paste event for the terminal input.
+ if (rtc.kind === 'terminal' && !event.altKey &&
+     ((event.code === 'KeyV' && (event.ctrlKey || event.metaKey)) || (event.code === 'Insert' && event.shiftKey))) return;
  if(composing||event.isComposing||event.keyCode===229||event.key==='Process'||event.key==='Dead')return;
  if(type==='keyup'){
   if(pressedKeys.delete(event.code)){event.preventDefault();sendInput({type:'key',code:event.code,state:'up'});}
@@ -397,8 +442,8 @@ for(const type of ['keydown','keyup'])keyboard.addEventListener(type,event=>{
  event.preventDefault(); if(sendInput({type:'key',code:event.code,state:'down'}))pressedKeys.add(event.code);
 });
 keyboard.addEventListener('blur',releaseInput);
-$('remote-video').addEventListener('loadeddata', updateSessionView);
-$('remote-video').addEventListener('playing', updateSessionView);
+$('remote-video').addEventListener('loadeddata', () => updateSessionView());
+$('remote-video').addEventListener('playing', () => updateSessionView());
 $('viewport').addEventListener('focus',()=>{if(rtc?.role==='viewer'&&$('control-enabled').checked)keyboard.focus({preventScroll:true});});
 window.addEventListener('blur', releaseInput);
 document.addEventListener('visibilitychange', () => { if (document.hidden) releaseInput(); });

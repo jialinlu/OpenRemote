@@ -306,9 +306,9 @@ dialog::backdrop { background: #0006; }
   main { margin-left: 0; }
   .heading-row, .local-footer { flex-wrap: wrap; }
   .device { padding: 10px; }
-  .device-row { grid-template-columns: 30px minmax(0,1fr) auto; gap: 8px; }
+  .device-row { grid-template-columns: 30px minmax(0,1fr); gap: 8px; }
   .device-row .computer-symbol { width: 30px; height: 30px; }
-  .device-actions { gap: 6px; }
+  .device-actions { grid-column: 1 / -1; flex-wrap: wrap; justify-content: flex-start; gap: 6px; }
   .device-recovery, .recent-result, .peer-details, .permission-row { margin-left: 0; }
   .peer-details .remove-peer { margin-left: 0; }
 }

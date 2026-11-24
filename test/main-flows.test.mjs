@@ -18,7 +18,8 @@ const oldUrl = 'wss://old.example/', nextUrl = 'wss://next.example/';
 
 // Exercise the real IPC handlers and signed messages using synthetic displays,
 // memory-only relay transports and a temporary directory. No OS input or capture.
-async function desktop(t, { openSshTerminal = async () => { throw new Error('Unexpected terminal launch'); } } = {}) {
+async function desktop(t, { openSshTerminal = async () => { throw new Error('Unexpected terminal launch'); },
+  terminalDialog, terminalWindows = [] } = {}) {
   const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'openremote-flow-'));
   t.after(() => fs.rm(folder, {recursive:true, force:true}));
   const handlers = new Map(), windows = new Map(), clients = new Map(), availability = new Map();
@@ -66,11 +67,19 @@ async function desktop(t, { openSshTerminal = async () => { throw new Error('Une
     nativeImage:{createFromPath:()=>({resize(){}})}, systemPreferences:{getMediaAccessStatus:()=>'granted'},
     powerMonitor:Object.assign(new EventEmitter(), {getSystemIdleState:()=>'active'}),
     powerSaveBlocker:{start:()=>1, isStarted:()=>true, stop(){}}, globalShortcut:{register:()=>true},
-    dialog:{showMessageBox:async()=>({response:1}), showErrorBox:(_title, message)=>assert.fail(message)},
+    dialog:{showMessageBox:async (_parent, options) => options.title === '远程终端请求' ? terminalDialog(options) : {response:1}, showErrorBox:(_title, message)=>assert.fail(message)},
     session:{defaultSession:{setPermissionRequestHandler(){}, setPermissionCheckHandler(){}}},
     desktopCapturer:{getSources:async()=>{ captures++; return displays.map(d=>({id:'source-'+d.id, display_id:String(d.id)})); }},
   };
   const replacements = new Map([['electron', electron], ['../shared/relay-client.cjs', {RelayClient:Client}],
+    ['../shared/host-terminal-window.cjs', {HostTerminalWindow:class {
+      constructor(options) { this.options = options; this.inputs = []; terminalWindows.push(this); }
+      isCaller() { return false; }
+      source(receiver) { this.receiver = receiver; return {id:'private-tab', mediaSource:'tab'}; }
+      input(event) { this.inputs.push(event); }
+      release() { this.inputs.push('released'); }
+      dispose() { this.disposed = true; }
+    }}],
     ['../shared/ssh.cjs', { normalizeSshProfile: ssh.normalizeSshProfile, openSshTerminal }],
     ['../shared/quick-connect.cjs', {QuickConnect:EventEmitter}], ['../shared/input.cjs', {NativeInput:class extends EventEmitter {
       start(){ this.trusted = true; } write(){}
@@ -342,4 +351,82 @@ test('pausing stops the current host even if persistence fails and retains the w
   assert.match(state.lastSession.reason, /重启前重新保存/);
   app.fromPeer('session-request', {sessionId:randomUUID()});
   assert.equal((await app.control('snapshot')).session, null);
+});
+
+test('terminal approval belongs to one request and cannot be reused after cancellation or revocation', async t => {
+  const pending = [], windows = [];
+  const app = await desktop(t, { terminalDialog: options => new Promise(resolve => pending.push({options,resolve})), terminalWindows:windows });
+  await app.pair();
+  const request = () => {
+    const id = randomUUID();
+    app.fromPeer('terminal-request', {sessionId:id, inputPolicyVersion:1});
+    return id;
+  };
+  const first = request();
+  assert.equal(pending[0].options.defaultId, 0);
+  assert.equal((await app.control('snapshot')).session, null);
+  assert.equal(windows.length, 0);
+  app.fromPeer('session-end', {sessionId:first});
+  const second = request();
+  pending[0].resolve({response:1});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(windows.length, 0);
+  pending[1].resolve({response:0});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(app.received().some(m => m.type === 'session-rejected' && m.payload.sessionId === second && /拒绝/.test(m.payload.reason)));
+  request();
+  await app.control('peer-control', app.peer.id, false);
+  pending[2].resolve({response:1});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(windows.length, 0);
+  assert.equal(app.captureCount(), 0);
+});
+
+test('terminal approval shares only its own window and scopes input to the current host policy', async t => {
+  const windows = [];
+  const app = await desktop(t, {terminalDialog:async () => ({response:1}), terminalWindows:windows});
+  await app.pair();
+  const id = randomUUID();
+  app.fromPeer('terminal-request', {sessionId:id, inputPolicyVersion:1});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal((await app.control('snapshot')).session.kind, 'terminal');
+  const [terminal] = windows;
+  terminal.options.onReady();
+  for (const page of ['index.html','sharing.html','session.html']) {
+    for (const [method,args] of [['local-terminal-ready',[80,24]],['local-terminal-input',['oops']],
+      ['local-terminal-resize',[90,30]],['local-terminal-output-ready',[]]]) {
+      await assert.rejects(app.call(page, method,...args), /Unauthorized/);
+    }
+  }
+  const remote = (name,...args) => app.call('session.html',name,id,...args);
+  const viewOnly = enabled => app.call('sharing.html','set-session-view-only',id,enabled);
+  assert.equal((await remote('capture-source')).id, 'private-tab');
+  await remote('session-connected');
+  const text = {type:'text',text:'测试'};
+  await remote('input',text);
+  await viewOnly(true);
+  await assert.rejects(remote('input',text), /未获授权/);
+  await viewOnly(false);
+  await assert.rejects(remote('input',text), /未获授权/);
+  await remote('input',{...text,inputRevision:2});
+  assert.deepEqual(terminal.inputs, [text,'released',{...text,inputRevision:2}]);
+  assert.equal(app.captureCount(), 0);
+  assert.equal(app.nativeEvents.length, 0);
+  app.remove(2);
+  assert.equal((await app.control('snapshot')).session.kind,'terminal');
+  terminal.options.onEnd('机主已关闭终端');
+  assert.equal((await app.control('snapshot')).session,null);
+  assert.equal(terminal.disposed,true);
+  await assert.rejects(remote('input',text),/Unauthorized/);
+});
+
+test('requesting a paired terminal sends only the new message type and closing cancels that exact session', async t => {
+  const app = await desktop(t);
+  await app.pair();
+  const result = await app.control('connect-terminal', app.peer.id);
+  assert.equal(result.kind, 'terminal');
+  assert.ok(app.received().some(m => m.type === 'terminal-request' && m.payload.sessionId === result.sessionId));
+  assert.equal(app.received().some(m => m.type === 'session-request'),false);
+  await app.control('disconnect',result.sessionId);
+  assert.ok(app.received().some(m => m.type === 'session-end' && m.payload.sessionId === result.sessionId));
 });

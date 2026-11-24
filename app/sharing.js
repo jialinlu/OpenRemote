@@ -18,14 +18,15 @@ function updateButtons() {
   const legacyViewOnly = viewOnly.checked && !currentSession.supportsInputPolicy;
   viewOnly.disabled = !currentSession || settingMode || pending || legacyViewOnly;
   accessMode.textContent = !currentSession ? '' : legacyViewOnly ? '仅可观看 · 旧版控制端恢复键鼠需重连' :
-    viewOnly.checked ? '对方仅可观看' : '对方可操作键鼠';
+    viewOnly.checked ? '对方仅可观看' : currentSession.kind === 'terminal' ? '对方可输入命令' : '对方可操作键鼠';
 }
 
 function showState(state) {
   currentSession = state.session?.role === 'host' ? state.session : null;
   document.body.dataset.connected = String(currentSession?.connected === true);
+  const resource = currentSession?.kind === 'terminal' ? '终端' : '桌面';
   statusText.textContent = currentSession
-    ? (currentSession.connected ? '正在共享本机桌面' : '正在建立或恢复共享连接')
+    ? (currentSession.connected ? '正在共享本机' + resource : '正在建立或恢复' + resource + '共享')
     : '共享已结束';
   peerText.textContent = currentSession ? '访问设备 · ' + currentSession.peerName : '';
   peerText.title = peerText.textContent;

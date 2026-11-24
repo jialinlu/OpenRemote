@@ -1,8 +1,8 @@
 # OpenRemote
 
-OpenRemote 是一款面向 **Windows x64** 和 **Apple Silicon macOS** 的远程桌面和 SSH 连接工具。需要画面时，可以连接已配对的桌面；只需要命令行时，可以直接打开系统 SSH 终端。共享桌面期间，机主可以随时收回键鼠或结束共享。
+OpenRemote 支持 **Windows x64** 和 **Apple Silicon macOS**。已配对电脑可以共享整个桌面，也可以在机主确认后只打开一个双方可见的命令行窗口。对于已有 SSH 服务的主机，可以从应用打开系统 SSH 客户端直接登录。
 
-![OpenRemote 设备与连接页，提供桌面和 SSH 入口](docs/images/console.png)
+![设备列表中的连接桌面、远程终端和独立 SSH 入口](docs/images/console.png)
 
 ## 从源码运行
 
@@ -19,11 +19,24 @@ npm start
 
 原生助手负责把获准的键鼠操作应用到被控电脑。`prepare-tunnel.mjs` 为当前平台准备临时公网入口所需的 cloudflared，并按项目固定的 SHA-256 核验下载内容。
 
-## 使用 SSH 终端
+## 使用配对设备的远程终端
+
+两端升级到 **0.3.5 或更高版本** 并完成配对。机主打开「允许远程访问」，保持电脑已登录、解锁，允许这台设备控制本机。
+
+1. 控制方在「设备与连接」找到对方，点击 **远程终端**。
+2. 机主在 30 秒内核对设备名称和编号，选择 **允许本次终端**。双方随后看到同一个终端窗口。终端使用机主当前账户，在 macOS 上运行 zsh，在 Windows 上运行 Windows PowerShell。
+3. 机主将共享终端放在前台，控制方点击画面后即可输入命令。机主切换到其他应用时，远端输入会暂停。勾选「仅允许观看」可以在保留画面的同时收回输入权限。
+4. 任一方关闭会话窗口，或在命令行输入 `exit`，即可结束本次共享。下次连接需要重新确认。
+
+这种连接复用已配对设备的网络连接，无需在目标机配置 SSH 服务、用户名或端口。只有专用终端窗口的画面会传给控制方。
+
+![控制端观看已配对设备的终端窗口与示例输出](docs/images/terminal.png)
+
+## 使用系统 SSH 终端
 
 在「设备与连接」页点击 **SSH 终端**，填写主机名或 IP 地址、端口（默认 22）和可选用户名，点击「打开终端」。也可以展开某台设备的「设备详情与授权」，为它单独记住 SSH 地址。密码、私钥口令和首次连接的主机指纹都在系统终端中处理。结束会话可在终端输入 `exit`。
 
-目标主机需要运行 SSH 服务，且控制电脑能通过当前网络或 VPN 到达该地址。目标可以是没有图形桌面的 Linux 服务器。桌面配对码和 SSH 登录是两套独立授权，OpenRemote 的临时连接入口只用于桌面信令。Windows 需要安装系统可选功能 **OpenSSH 客户端**。[Windows OpenSSH 说明](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh-overview)
+目标主机需要运行 SSH 服务，且控制电脑能通过当前网络或 VPN 到达该地址。目标可以是没有图形桌面的 Linux 服务器。桌面配对码和 SSH 登录是两套独立授权，OpenRemote 的临时连接入口用于已配对桌面和终端会话的信令。Windows 需要安装系统可选功能 **OpenSSH 客户端**。[Windows OpenSSH 说明](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh-overview)
 
 ![SSH 连接窗口的主机、端口和用户名输入框](docs/images/ssh.png)
 
@@ -54,7 +67,7 @@ npm run pack
 
 安装包输出到 `dist/openremote/`。默认生成当前平台的包。Windows 便携 ZIP 可用 `npm run pack -- --win zip --x64` 单独构建。macOS 构建使用本地 ad-hoc 签名，未经 Apple 公证。Windows 构建未配置商业签名。[Windows 构建说明](docs/WINDOWS-BUILD.md) · [双平台自动构建示例](docs/ci/build.yml)
 
-0.3.4 的测试覆盖 SSH 地址与端口、终端启动、连接设置存储、窗口调用权限，以及原有的 WebRTC 桌面会话。已在 macOS 本地回环环境验证系统 OpenSSH 的公钥认证、交互式输入和主机密钥变更拒绝。Windows 实机和跨网两机操作仍待验证。[验证记录](docs/VALIDATION.md) · [两机验收清单](docs/TESTING.md) · [渲染器测试](scripts/smoke-renderer.mjs)
+验证覆盖配对终端的当次确认、窗口采集、输入权限和会话结束，以及系统 SSH 的地址校验、启动参数和本机配置存储。已在 macOS 本地回环环境验证系统 OpenSSH 的公钥认证、交互式输入和主机密钥变更拒绝。Windows 实机和跨网两机操作仍待验证。[验证记录](docs/VALIDATION.md) · [两机验收清单](docs/TESTING.md) · [渲染器测试](scripts/smoke-renderer.mjs)
 
 ## 源码目录
 

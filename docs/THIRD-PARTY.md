@@ -9,6 +9,9 @@ OpenRemote 的配对、授权、信令协议、界面、会话管理和系统输
 | Electron / Chromium / Node.js | 跨平台桌面、屏幕采集、WebRTC 和运行时 | [Electron](https://github.com/electron/electron)，MIT；发行目录保留 Electron 许可证（Windows 为 `LICENSE.electron.txt`）和 `LICENSES.chromium.html`，其中含 Chromium 及相关组件声明 |
 | https-proxy-agent / agent-base | HTTP CONNECT 代理支持 | npm 包随附 MIT 许可证；分发依赖时保留原 LICENSE |
 | ws | WebSocket 信令 | [ws](https://github.com/websockets/ws)，MIT；保留 npm 包内 LICENSE |
+| xterm.js 6.0.0 / FitAddon 0.11.0 | 在本机窗口显示交互终端，并根据可用空间调整行列 | [xterm.js](https://github.com/xtermjs/xterm.js)，MIT。两份 npm 包均保留原许可证 |
+| node-pty 1.1.0 / node-addon-api | 启动本机伪终端和系统 shell，随平台分发上游原生模块 | [node-pty](https://github.com/microsoft/node-pty)、[node-addon-api](https://github.com/nodejs/node-addon-api)，MIT。依赖保留原许可证 |
+| winpty / Windows Console (ConPTY) | node-pty 随附的 Windows 终端运行组件 | [winpty](https://github.com/rprichard/winpty) 和 [Windows Terminal](https://github.com/microsoft/terminal) 均采用 MIT 许可证，全文在 `app/licenses/winpty-LICENSE.txt` 和 `app/licenses/conpty-LICENSE.txt` |
 | cloudflared 2026.10.7 | 可选免账号公网信令入口；不转发画面和键鼠数据通道 | [固定官方发行版本](https://github.com/cloudflare/cloudflared/releases/tag/2026.10.7)，Apache-2.0；安装包 `resources/tunnel` 保留原版 LICENSE 与 provenance.json |
 | Zig 0.15.2 / LLVM / MinGW-w64 | 在 Mac 上编译原创 Windows 输入助手的构建工具与静态运行库 | [Zig 官方下载](https://ziglang.org/download/)、[Zig 源码](https://github.com/ziglang/zig/tree/0.15.2)；编译器不随应用分发，相关运行库许可证随 Windows 资源分发 |
 

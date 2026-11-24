@@ -16,6 +16,11 @@ const pairingCode = new PairingCode();
 const { cleanSessionStats } = require('../shared/diagnostics.cjs');
 const { normalizeSshProfile, openSshTerminal } = require('../shared/ssh.cjs');
 
+const { TerminalConsent } = require('../shared/terminal-consent.cjs');
+const { HostTerminalWindow } = require('../shared/host-terminal-window.cjs');
+const consent = new TerminalConsent();
+let hostTerminal;
+
 app.setName('bridgedesk'); // Stable OS key-store namespace; product name is OpenRemote.
 app.setAboutPanelOptions({ applicationName: 'OpenRemote', applicationVersion: app.getVersion() });
 // Keep the legacy storage namespace so upgrades preserve paired identities.
@@ -66,6 +71,17 @@ function createRemoteWindow(active) {
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
   window.webContents.setIgnoreMenuShortcuts(active.role === 'viewer');
+  if (active.kind === 'terminal' && active.role === 'viewer') {
+    window.webContents.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown' || input.alt || !window.isFocused() || gate.active !== active) return;
+      const pasteKey = input.code === 'KeyV' && (process.platform === 'darwin' ? input.meta && !input.control : input.control && !input.meta);
+      const pasteInsert = input.code === 'Insert' && input.shift && !input.meta && !input.control;
+      if (pasteKey || pasteInsert) {
+        event.preventDefault();
+        if (!input.isAutoRepeat) window.webContents.paste();
+      }
+    });
+  }
   for (const event of ['enter-full-screen','leave-full-screen']) window.on(event, () => { if (remoteWin === window) window.webContents.send('bridge:event', {type:'window-mode',payload:{fullscreen:event==='enter-full-screen'}}); });
   window.on('close', () => { if (remoteWin === window && gate.active?.sessionId === active.sessionId) stopSession('远程窗口已关闭。'); });
   window.on('closed', () => { if (remoteWin === window) remoteWin = undefined; });
@@ -76,7 +92,7 @@ function createRemoteWindow(active) {
 function sharingState() {
   const active = gate.active;
   return { session: active?.role === 'host' ? { sessionId: active.sessionId, role: 'host', peerName: active.peerName,
-    connected: active.connected, viewOnly: active.viewOnly, supportsInputPolicy: active.supportsInputPolicy } : null };
+    kind: active.kind, connected: active.connected, viewOnly: active.viewOnly, supportsInputPolicy: active.supportsInputPolicy } : null };
 }
 function showSharingIndicator(active) {
   const bounds = screen.getPrimaryDisplay().workArea;
@@ -92,7 +108,7 @@ function showSharingIndicator(active) {
   indicator.webContents.on('will-navigate', event => event.preventDefault());
   const current = () => sharingWin === indicator && gate.active?.sessionId === active.sessionId;
   indicator.once('ready-to-show', () => { if (current()) indicator.showInactive(); });
-  indicator.on('close', () => { if (current()) stopSession('本机已结束屏幕共享。'); });
+  indicator.on('close', () => { if (current()) stopSession('本机已结束共享。'); });
   indicator.webContents.on('render-process-gone', () => { if (current()) stopSession('共享提示窗口已退出，共享已停止。'); });
   indicator.loadFile(path.join(__dirname, 'sharing.html')).catch(() => { if (current()) stopSession('无法打开本机共享提示，共享已停止。'); });
 }
@@ -215,7 +231,12 @@ function sshProfileKey(peerId) {
   if (!peerFor(peerId)) throw new Error('设备已解除配对，请从设备页的「SSH 终端」直接连接。');
   return peerId;
 }
+function cancelTerminalRequest(id) {
+  const ticket = consent.pending;
+  if (ticket?.peerId === id) consent.cancel(id, ticket.sessionId);
+}
 function forgetPeer(id) {
+  cancelTerminalRequest(id);
   const peers = data.peers, profiles = data.sshProfiles;
   data.peers = peers.filter(peer => peer.id !== id);
   if (profiles && Object.hasOwn(profiles, id)) {
@@ -254,15 +275,18 @@ function pauseHosting(sessionId) {
   }
 }
 function stopSession(reason = '会话已断开。', notify = true) {
+  consent.clear();
   const current = gate.end();
+  const terminal = hostTerminal; hostTerminal = undefined;
+  terminal?.dispose();
   if (win && !win.isDestroyed()) win.webContents.setIgnoreMenuShortcuts(false);
-  clearTimeout(sessionTimer); native?.release();
+  clearTimeout(sessionTimer); if (current?.kind !== 'terminal') native?.release();
   if (wakeLock !== undefined && powerSaveBlocker.isStarted(wakeLock)) powerSaveBlocker.stop(wakeLock);
   wakeLock = undefined;
   localStats = null; remoteStats = null;
   if (current && notify) { try { send(peerFor(current.peerId), 'session-end', { sessionId: current.sessionId, reason }); } catch {} }
   if (current) {
-    lastSession = {peerId: current.peerId, peerName: current.peerName, role: current.role, reason, endedAt: Date.now()};
+    lastSession = {peerId: current.peerId, peerName: current.peerName, role: current.role, kind: current.kind, reason, endedAt: Date.now()};
     emit('session-end', { reason });
   }
   const indicator = sharingWin; sharingWin = undefined;
@@ -271,23 +295,33 @@ function stopSession(reason = '会话已断开。', notify = true) {
   if (old && !old.isDestroyed()) old.destroy();
   changed();
 }
-function startSession(peer, sessionId, role, inputPolicyVersion) {
-  const active = gate.begin({ peer, sessionId, role, hostEnabled: data.settings.hostEnabled, inputPolicyVersion });
+function startSession(peer, sessionId, role, inputPolicyVersion, kind = 'desktop') {
+  if (consent.pending) throw new Error('本机正在确认远程终端请求。');
+  const active = gate.begin({ peer, sessionId, role, kind, hostEnabled: data.settings.hostEnabled, inputPolicyVersion });
   try {
     if (role === 'host') showSharingIndicator(active);
     createRemoteWindow(active);
+    if (role === 'host' && kind === 'terminal') {
+      active.terminalAccepted = true;
+      hostTerminal = new HostTerminalWindow({ BrowserWindow, appDir: __dirname, peerName: peer.name,
+        onReady: () => { if (gate.active === active) emit('session-start', { ...active, settings: data.settings }); },
+        onEnd: reason => { if (gate.active === active) stopSession(reason); },
+      });
+    }
   } catch (error) { stopSession('无法打开会话窗口。', false); throw error; }
   wakeLock = powerSaveBlocker.start('prevent-display-sleep');
-  sessionTimer = setTimeout(() => stopSession('连接超时，请检查双方网络及 TURN 配置。'), 45000);
+  sessionTimer = setTimeout(() => stopSession(kind === 'terminal' && role === 'viewer' && !active.terminalAccepted
+    ? '等待机主确认已超时。请确认对方在线，并已升级至 0.3.5 或更高版本。' : '连接超时，请检查双方网络及 TURN 配置。'), 45000);
   changed(); return active;
 }
 function newRelayClient() {
   return new RelayClient(data.identity, self(), { resolveProxy: url => session.defaultSession.resolveProxy(url.replace(/^ws:/, 'http:').replace(/^wss:/, 'https:')) });
 }
 function useRelay(client) {
+  consent.clear();
   const old = relay; relay = client; old?.close(); online.clear();
   relayState = {status: client.status, message: ''};
-  client.on('status', state => { if (client !== relay) return; relayState = state; if (state.status !== 'ready') online.clear(); changed(); });
+  client.on('status', state => { if (client !== relay) return; relayState = state; if (state.status !== 'ready') { online.clear(); consent.clear(); } changed(); });
   const probe = () => { if (client === relay) for (const peer of data.peers) client.send({ type: 'probe', to: peer.id }); };
   client.on('ready', probe);
   client.on('message', message => { if (client === relay) receive(message).catch(() => emit('notice', '已忽略未通过身份验证或格式检查的消息。')); });
@@ -320,8 +354,33 @@ async function useInvitationRelay(relayUrl, peerId, stillRequested) {
     if (candidate !== relay) candidate.close();
   }
 }
+async function requestHostTerminal(peer, payload) {
+  const {sessionId} = payload;
+  const permitted = () => !quitting && !locked && !suspended && powerMonitor.getSystemIdleState(1) !== 'locked' &&
+    !gate.active && data.settings.hostEnabled && peerFor(peer.id) === peer && peer.allowControl === true;
+  if (!permitted()) throw new Error('本机暂不能共享终端，请检查设备授权、锁屏和会话状态。');
+  const pending = consent.pending;
+  if (pending?.peerId === peer.id && pending.sessionId === sessionId) return;
+  const ticket = consent.begin(peer.id, sessionId);
+  if (!ticket) throw new Error('本机正在处理其他请求，或终端会话编号无效。');
+  try {
+    showWindow();
+    const {response} = await dialog.showMessageBox(win, {
+      type:'question', title:'远程终端请求', message:`允许「${peer.name}」操作这台电脑的命令行？`,
+      detail:`已配对设备 ${deviceNumber(peer.id)} 请求打开一个双方可见的终端。命令以你当前账户的权限执行。你可以切换到仅观看，或关闭终端结束共享。
+
+本次确认在 30 秒后过期。`,
+      buttons:['拒绝', '允许本次终端'], defaultId:0, cancelId:0, noLink:true, signal:ticket.signal,
+    });
+    if (!consent.consume(ticket)) return;
+    if (response !== 1) throw new Error('机主已拒绝本次远程终端请求。');
+    if (!permitted()) throw new Error('终端授权已失效。');
+    startSession(peer, sessionId, 'host', payload.inputPolicyVersion, 'terminal');
+  } catch (error) { if (!ticket.signal.aborted) throw error; }
+  finally { if (consent.isCurrent(ticket)) consent.clear(); }
+}
 async function receive(message) {
-  if (message.type === 'presence') { if (peerFor(message.id)) { online.set(message.id, message.online === true); changed(); } return; }
+  if (message.type === 'presence') { if (peerFor(message.id)) { online.set(message.id, message.online === true); if (message.online === false) cancelTerminalRequest(message.id); changed(); } return; }
   if (message.type === 'error') {
     if (message.code === 'peer-offline' && message.to) {
       if (peerFor(message.to)) online.set(message.to, false);
@@ -388,6 +447,13 @@ async function receive(message) {
     if (gate.active?.peerId === peer.id) stopSession('对方已解除配对。', false);
     forgetPeer(peer.id); changed(); return;
   }
+  if (type === 'terminal-request') {
+    if (gate.matches(peer.id, payload.sessionId)) return;
+    try { await requestHostTerminal(peer, payload); }
+    catch (error) { if (peerFor(peer.id) === peer) send(peer, 'session-rejected', {sessionId:payload.sessionId, reason:error.message}); }
+    return;
+  }
+  if (type === 'session-end' && consent.cancel(peer.id, payload.sessionId)) return;
   if (type === 'session-request') {
     try {
       if (locked || suspended || powerMonitor.getSystemIdleState(1) === 'locked') throw new Error('被控电脑已锁屏或休眠，请先在本机解锁。');
@@ -401,6 +467,14 @@ async function receive(message) {
   if (!gate.matches(peer.id, payload.sessionId)) return;
   if (type === 'session-stats') { remoteStats = { ...cleanSessionStats(payload.stats), receivedAt: new Date().toISOString() }; scheduleDiagnostic(); return; }
   if (type === 'session-end' || type === 'session-rejected') { stopSession(String(payload.reason || '对方已结束会话。').slice(0, 200), false); return; }
+  if (type === 'session-accept' && gate.active.role === 'viewer' && gate.active.kind === 'terminal') {
+    if (!gate.active.terminalAccepted) {
+      gate.active.terminalAccepted = true;
+      clearTimeout(sessionTimer);
+      sessionTimer = setTimeout(() => stopSession('终端连接超时，请检查双方网络及 TURN 配置。'), 45000);
+      changed();
+    }
+  }
   if (['session-accept', 'offer', 'answer', 'ice', 'restart-request'].includes(type)) emit('signal', { type, payload });
 }
 function bind(name, fn) {
@@ -408,6 +482,10 @@ function bind(name, fn) {
     const consoleCaller = event.sender === win?.webContents && event.senderFrame === win.webContents.mainFrame && event.senderFrame.url === APP_URL;
     const remoteCaller = event.sender === remoteWin?.webContents && event.senderFrame === remoteWin.webContents.mainFrame && event.senderFrame.url === REMOTE_URL;
     const sharingCaller = event.sender === sharingWin?.webContents && event.senderFrame === sharingWin.webContents.mainFrame && event.senderFrame.url === SHARING_URL;
+    if (name.startsWith('local-terminal-')) {
+      if (!hostTerminal?.isCaller(event) || gate.active?.kind !== 'terminal' || gate.active.role !== 'host') throw new Error('Unauthorized IPC');
+      return fn(...args);
+    }
     if (sharingCaller) {
       if (name === 'snapshot') return sharingState();
       if (!['disconnect', 'pause-hosting', 'set-session-view-only'].includes(name) || gate.active?.role !== 'host' || args[0] !== gate.active.sessionId) throw new Error('Unauthorized IPC');
@@ -419,6 +497,10 @@ function bind(name, fn) {
 }
 function setupIpc() {
   bind('snapshot', snapshot);
+  bind('local-terminal-ready', (cols, rows) => hostTerminal.ready(cols, rows));
+  bind('local-terminal-output-ready', () => hostTerminal.outputReady());
+  bind('local-terminal-input', text => hostTerminal.pty?.write(text));
+  bind('local-terminal-resize', (cols, rows) => hostTerminal.pty?.resize(cols, rows));
   bind('get-ssh-profile', peerId => {
     const key = sshProfileKey(peerId);
     const saved = data.sshProfiles?.[key];
@@ -493,6 +575,7 @@ function setupIpc() {
     if (next.connectionMode !== data.settings.connectionMode) throw new Error('请使用启动或停止连接服务、导入连接文件来切换连接方式。');
     if (next.connectionMode === 'quick-host' && next.relayUrl !== data.settings.relayUrl) throw new Error('临时连接服务的地址由软件自动管理。');
     const reconnect = next.relayUrl !== data.settings.relayUrl || next.name !== data.settings.name;
+    if (!next.hostEnabled || reconnect) consent.clear();
     data.settings = next; persist();
     if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: next.autoLaunch });
     syncBackgroundWakeLock();
@@ -592,33 +675,38 @@ function setupIpc() {
   });
   bind('peer-control', (id, enabled) => {
     const peer = peerFor(id); if (!peer) throw new Error('设备未配对。');
-    peer.allowControl = enabled === true; persist();
+    peer.allowControl = enabled === true;
+    if (!peer.allowControl) cancelTerminalRequest(id);
+    persist();
     if (!peer.allowControl && gate.active?.peerId === id && gate.active.role === 'host') stopSession('本机已关闭此设备的控制权限。');
     changed();
   });
-  bind('connect', id => {
+  function requestSession(id, kind) {
     const peer = peerFor(id); if (!peer) throw new Error('设备未配对。');
-    const active = startSession(peer, randomUUID(), 'viewer');
-    try { send(peer, 'session-request', { sessionId: active.sessionId, inputPolicyVersion: 1 }); }
+    const active = startSession(peer, randomUUID(), 'viewer', undefined, kind);
+    try { send(peer, kind === 'terminal' ? 'terminal-request' : 'session-request', { sessionId: active.sessionId, inputPolicyVersion: 1 }); }
     catch (e) { stopSession(e.message, false); throw e; }
     emit('session-start', { ...active, settings: data.settings }); return active;
-  });
+  }
+  bind('connect', id => requestSession(id, 'desktop'));
+  bind('connect-terminal', id => requestSession(id, 'terminal'));
   bind('disconnect', sessionId => { if (sessionId === undefined || gate.active?.sessionId === sessionId) stopSession(); });
   bind('pause-hosting', pauseHosting);
   bind('set-session-view-only', async (sessionId, viewOnly) => {
     const active = gate.active;
-    if (viewOnly === false && active.viewOnly && active.supportsInputPolicy) {
+    if (active.kind !== 'terminal' && viewOnly === false && active.viewOnly && active.supportsInputPolicy) {
       const revision = active.inputRevision;
       await native.confirmReleased();
       if (gate.active !== active || active.inputRevision !== revision) throw new Error('共享权限已变化。');
     }
     if (gate.setViewOnly(sessionId, viewOnly)) {
-      if (viewOnly) native.release();
+      if (viewOnly) { if (active.kind === 'terminal') hostTerminal.release(); else native.release(); }
       changed();
     }
     return sharingState();
   });
-  bind('session-failed', (sessionId, code) => { if (gate.active?.sessionId === sessionId) stopSession(failureReasons.get(code) || '远程会话发生错误，请重新连接。'); });
+  bind('session-failed', (sessionId, code) => { if (gate.active?.sessionId === sessionId) stopSession(gate.active.kind === 'terminal' && ['source-missing','capture-permission','capture-stopped','capture-failed'].includes(code)
+      ? '终端画面共享已停止，请让机主重新打开终端会话。' : failureReasons.get(code) || '远程会话发生错误，请重新连接。'); });
   bind('signal', (sessionId, type, payload) => {
     if (!gate.active || gate.active.sessionId !== sessionId || !['session-accept', 'offer', 'answer', 'ice', 'restart-request'].includes(type)) throw new Error('无效会话消息。');
     if (!payload || typeof payload !== 'object' || JSON.stringify(payload).length > 100000) throw new Error('无效消息。');
@@ -626,6 +714,10 @@ function setupIpc() {
   });
   bind('capture-source', async sessionId => {
     if (!gate.active || gate.active.sessionId !== sessionId || gate.active.role !== 'host') throw new Error('没有已授权的被控会话。');
+    if (gate.active.kind === 'terminal') {
+      if (!hostTerminal) throw new Error('本机终端已关闭。');
+      return hostTerminal.source(remoteWin.webContents);
+    }
     const displays = screen.getAllDisplays();
     const display = data.settings.displayId ? displays.find(d => String(d.id) === data.settings.displayId) : screen.getPrimaryDisplay();
     if (!display) throw new Error('[source-missing] ' + failureReasons.get('source-missing'));
@@ -639,7 +731,7 @@ function setupIpc() {
   bind('session-connected', (sessionId, connected = true) => {
     if (gate.active?.sessionId !== sessionId) return;
     gate.active.connected = connected === true;
-    if (!gate.active.connected) native.release();
+    if (!gate.active.connected) { if (gate.active.kind === 'terminal') hostTerminal?.release(); else native.release(); }
     else { clearTimeout(sessionTimer); gate.heartbeat(sessionId); }
     changed();
   });
@@ -655,6 +747,7 @@ function setupIpc() {
   });
   bind('input', (sessionId, event) => {
     if (!gate.canInject(sessionId, event?.inputRevision) || !data.settings.hostEnabled || !peerFor(gate.active.peerId)?.allowControl) throw new Error('输入未获授权。');
+    if (gate.active.kind === 'terminal') return hostTerminal?.input(event);
     const display = screen.getAllDisplays().find(d => d.id === gate.active.displayId);
     if (!display) { stopSession('被控显示器已断开。'); return; }
     native.inject(event, display.bounds);
@@ -689,8 +782,14 @@ else {
     win.on('close', event => { if (!quitting && tray) { event.preventDefault(); win.hide(); } });
     win.on('focus', () => { native?.write('ping'); changed(); });
     win.webContents.on('render-process-gone', () => stopSession('界面进程退出，会话已结束。'));
-    session.defaultSession.setPermissionRequestHandler((contents, permission, callback) => callback(contents === remoteWin?.webContents && ['media', 'display-capture'].includes(permission) && gate.active?.role === 'host'));
-    session.defaultSession.setPermissionCheckHandler((contents, permission) => contents === remoteWin?.webContents && ['media', 'display-capture'].includes(permission) && gate.active?.role === 'host');
+    function mediaPermission(contents, permission) {
+      if (gate.active?.role !== 'host') return false;
+      // Chromium requests permission on the *captured* WebContents for tab capture.
+      if (gate.active.kind === 'terminal' && permission === 'display-capture') return hostTerminal?.permitsTabCapture(contents) === true;
+      return contents === remoteWin?.webContents && ['media','display-capture'].includes(permission);
+    }
+    session.defaultSession.setPermissionRequestHandler((contents, permission, callback) => callback(mediaPermission(contents, permission)));
+    session.defaultSession.setPermissionCheckHandler(mediaPermission);
     const trayIcon = nativeImage.createFromPath(path.join(__dirname, 'icon.png')).resize({ width: 20, height: 20 });
     tray = new Tray(trayIcon); tray.on('click', showWindow); updateTray();
     setupIpc(); await win.loadFile(path.join(__dirname, 'index.html')); relayConnect(); syncBackgroundWakeLock();
@@ -699,7 +798,7 @@ else {
     changed();
     if (!emergencyShortcutAvailable) emit('notice', '紧急断开快捷键注册失败，可使用窗口内的断开按钮。');
     screen.on('display-removed', (_event, display) => {
-      if (gate.active?.role !== 'host') return;
+      if (gate.active?.role !== 'host' || gate.active.kind === 'terminal') return;
       const target = gate.active.displayId ?? data.settings.displayId;
       if (String(target) === String(display.id)) stopSession(failureReasons.get('source-missing'));
     });

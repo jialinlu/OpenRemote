@@ -1,7 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const api = window.bridge;
-let state, toastTimer, pairTarget, connectingId;
+let state, toastTimer, pairTarget, connecting;
 let sshTarget;
 let setupRole = 'viewer', setupExpanded = false;
 let trackedSessionId, wasConnected = false;
@@ -96,13 +96,16 @@ function updateRows(container, rows, items, create) {
   }
 }
 function connectDisabled(peer) {
-  return state.relay.status !== 'ready' || !peer.online || !!state.session || !!connectingId;
+  return state.relay.status !== 'ready' || !peer.online || !!state.session || !!connecting;
 }
-async function connectPeer(id) {
-  connectingId = id;
+async function connectPeer(id, kind = 'desktop') {
+  connecting = { id, kind };
   render(state);
-  try { await api.connect(id); }
-  finally { connectingId = null; render(state); }
+  try {
+    if (kind === 'terminal') await api.connectTerminal(id);
+    else await api.connect(id);
+  }
+  finally { connecting = null; render(state); }
 }
 function peerRow(id) {
   const element = node('article', 'device');
@@ -121,6 +124,12 @@ function peerRow(id) {
     message(feedback);
     return connectPeer(id);
   }, feedback);
+  const terminal = button('远程终端', 'secondary compact', () => {
+    message(feedback);
+    return connectPeer(id, 'terminal');
+  }, feedback);
+  terminal.title = '机主同意后，共享专用终端窗口';
+  for (const action of [connect, terminal]) action.setAttribute('aria-describedby', name.id);
   const repair = button('更新连接文件', 'secondary compact', () => importConnection(feedback), feedback);
   const details = node('div', 'peer-details');
   details.id = 'peer-details-' + id;
@@ -153,7 +162,7 @@ function peerRow(id) {
   const last = node('p', 'recent-result');
   const recovery = node('div', 'device-recovery');
   recovery.append(reason, repair);
-  actions.append(status, connect);
+  actions.append(status, connect, terminal);
   main.append(symbol, heading, actions);
   element.append(main, recovery, last, details, feedback);
   return { element, update(peer) {
@@ -162,8 +171,10 @@ function peerRow(id) {
     write(status, online === true ? '在线' : online === false ? '离线' : '状态未知');
     status.classList.toggle('online', online === true);
     checkbox.checked = peer.allowControl;
-    connect.disabled = connectDisabled(peer);
-    write(connect, connectingId === id ? '正在连接…' : '连接桌面');
+    connect.disabled = terminal.disabled = connectDisabled(peer);
+    const pendingKind = connecting?.id === id && connecting.kind;
+    write(connect, pendingKind === 'desktop' ? '正在连接…' : '连接桌面');
+    write(terminal, pendingKind === 'terminal' ? '正在申请…' : '远程终端');
     const hint = online === false ? '请确认对方电脑已启动并接入同一连接服务。' :
       state.session && state.session.peerId !== id ? '结束当前会话后可连接此设备。' : '';
     message(reason, hint);
@@ -243,7 +254,7 @@ function renderSetup(next) {
     $('device-service-action').disabled = !hosting && !!next.session;
   }
   write($('peer-count'), String(next.peers.length));
-  write($('device-intro'), hasPeers ? '选择一台已配对的电脑，打开远程桌面。' : '选择这台电脑要做的事。');
+  write($('device-intro'), hasPeers ? '选择已配对的电脑，连接桌面或打开远程终端。' : '选择这台电脑要做的事。');
   $('show-setup').hidden = !hasPeers;
   $('setup-panel').hidden = hasPeers && !setupExpanded;
   $('show-setup').setAttribute('aria-expanded', String(!$('setup-panel').hidden));
@@ -273,9 +284,12 @@ function renderSession(next) {
     wasConnected = false;
   }
   if (connected) wasConnected = true;
+  const terminal = active?.kind === 'terminal';
+  const resource = terminal ? '终端' : '桌面';
   const status = !connected && wasConnected ? '网络中断，正在恢复连接…' : hosting ?
-    (connected ? '正在共享本机桌面' : '正在准备共享本机桌面…') :
-    (connected ? '远程桌面已连接' : '正在连接远程桌面…');
+    (connected ? '正在共享本机' + resource : '正在准备共享本机' + resource + '…') :
+    terminal && !connected && !active.terminalAccepted ? '等待机主确认远程终端请求…' :
+    (connected ? '远程' + resource + '已连接' : '正在连接远程' + resource + '…');
   $('session-dot').hidden = !active;
   $('session-dot').classList.toggle('connecting', !connected);
   $('active-session').classList.toggle('connecting', !connected);
@@ -597,7 +611,7 @@ $('active-open').addEventListener('click', () => {
 });
 $('show-session').addEventListener('click', () => run(() => api.showSession()));
 $('session-devices').addEventListener('click', () => showPage('devices'));
-$('session-retry').addEventListener('click', () => run(() => connectPeer(state.lastSession.peerId), $('session-status')));
+$('session-retry').addEventListener('click', () => run(() => connectPeer(state.lastSession.peerId, state.lastSession.kind), $('session-status')));
 api.onEvent(event => {
   if (event.type === 'state') render(event.payload);
   if (event.type === 'notice') toast(event.payload);

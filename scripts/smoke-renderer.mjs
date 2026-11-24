@@ -53,7 +53,7 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const origin = `http://127.0.0.1:${server.address().port}`;
 const sides = ['host', 'viewer'];
 const ids = { host: '1'.repeat(64), viewer: '2'.repeat(64) };
-const names = { host: '合成画面测试端', viewer: 'OpenRemote 测试设备' };
+const names = { host: '书房的 Mac mini', viewer: '工作室笔记本' };
 const { version } = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
 const states = Object.fromEntries(sides.map(side => [side, {
   self: { id: ids[side], name: names[side] },
@@ -68,6 +68,7 @@ const pairActions = [];
 const submittedCodes = [];
 const sshProfiles = new Map(), sshLaunches = [];
 let nextSshRead, nextSshLaunch;
+let terminalApproval;
 let copiedCode;
 let delayedDisplayList;
 let browser, active = false;
@@ -145,7 +146,7 @@ async function invoke(side, method, args) {
     case 'listDisplays':
       if (delayedDisplayList) await delayedDisplayList;
       return [{ id: 'fixture', label: 'Synthetic canvas', width: 1280, height: 720, primary: true }];
-    case 'captureSource': return { id: 'synthetic-canvas', width: 1280, height: 720 };
+    case 'captureSource': return { id: 'synthetic-canvas', mediaSource: states[side].session.kind === 'terminal' ? 'tab' : 'desktop', width: 1280, height: 720 };
     case 'saveSettings': states[side].settings = args[0]; return states[side];
     case 'input': inputs.push({ side, sessionId: args[0], ...args[1] }); return;
     case 'sessionConnected': {
@@ -159,11 +160,15 @@ async function invoke(side, method, args) {
       if (active) await emit(other(side), 'signal', { type: args[1], payload: { ...args[2], sessionId: args[0] } });
       return;
     }
-    case 'connect': {
+    case 'connect':
+    case 'connectTerminal': {
       assert.equal(side, 'viewer'); assert.equal(args[0], ids.host);
+      const terminal = method === 'connectTerminal';
       active = true;
       for (const role of ['viewer', 'host']) {
-        const session = { sessionId: 'renderer-smoke-session', peerId: ids[other(role)], peerName: names[other(role)], role,
+        if (terminal && role === 'host') await terminalApproval;
+        const session = { sessionId: terminal ? 'terminal-smoke-session' : 'renderer-smoke-session',
+          kind: terminal ? 'terminal' : 'desktop', peerId: ids[other(role)], peerName: names[other(role)], role,
           viewOnly: false, inputRevision: 0, supportsInputPolicy: role === 'host' };
         states[role].session = session;
         await refresh(role);
@@ -344,6 +349,7 @@ try {
   assert.equal(await consoles.viewer.locator('.device-recovery:visible').count(), 0);
   await consoles.viewer.screenshot({ path: path.join(artifacts, 'openremote-service-offline.png') });
   const offlinePeer = consoles.viewer.getByRole('article', { name:'出差笔记本' });
+  assert.ok(await offlinePeer.getByRole('button', {name:'远程终端'}).isDisabled());
   const peerDetails = offlinePeer.getByRole('button', {name:'设备详情与授权'});
   await peerDetails.click();
   await offlinePeer.getByRole('button', { name:'SSH 终端' }).click();
@@ -374,6 +380,11 @@ try {
   const device = consoles.viewer.getByRole('article', { name: longName });
   const connectButton = device.getByRole('button', { name: '连接桌面' });
   const connectBounds = await connectButton.boundingBox();
+  for (const action of [device.getByRole('button', {name:'远程终端'}), consoles.viewer.locator('#open-ssh')]) {
+    const bounds = await action.boundingBox();
+    assert.ok(bounds && bounds.x >= 0 && bounds.x + bounds.width <= 900 && bounds.y + bounds.height <= 650,
+      'the paired terminal and independent SSH actions fit the minimum window');
+  }
   const statusBounds = await device.getByText('在线', { exact: true }).boundingBox();
   assert.ok(connectBounds && connectBounds.y >= 0 && connectBounds.y + connectBounds.height <= 650 && connectBounds.x + connectBounds.width <= 900, 'long device names leave the action visible without scrolling');
   const centerY = bounds => bounds.y + bounds.height / 2;
@@ -559,7 +570,6 @@ try {
   await hostViewOnly.uncheck();
   await until(async () => !(await viewerControl.isDisabled()), 'the host restores permission');
   await viewerControl.check();
-  await indicator.close();
   const postRestartInput = inputs.length;
   await pages.viewer.locator('#viewport').focus();
   await pages.viewer.keyboard.press('KeyR');
@@ -590,6 +600,80 @@ try {
   const afterStale = await Promise.all(sides.map(side => pages[side].evaluate(() => ({ pcs: window.__rendererSmoke.pcs.length, tracks: window.__rendererSmoke.tracks.length, captures: window.__rendererSmoke.captureRequests.length }))));
   assert.deepEqual(afterStale, resourceCounts, 'stale queued start must not recreate RTC or capture resources');
   assert.equal(Object.values(signals).reduce((a, b) => a + b, 0), signalCount, 'stale start must not send new signaling');
+  // Render the actual host terminal page with fixture output only. The captured
+  // sample is also the source for the terminal viewer screenshot in the README.
+  const hostExample = await browser.newPage({viewport:{width:960,height:540}, deviceScaleFactor:4/3});
+  let examplePainted = false;
+  await hostExample.exposeBinding('__smokeInvoke', (_, method) => {
+    if (method === 'localTerminalReady') return {peerName:names.viewer};
+    if (method === 'localTerminalOutputReady') examplePainted = true;
+  });
+  await hostExample.addInitScript({path:path.join(root,'test/fixtures/renderer-bridge.js')});
+  await hostExample.goto(pathToFileURL(path.join(root,'app/host-terminal.html')).href);
+  await hostExample.getByText(/访问设备 · 工作室笔记本/).waitFor();
+  const sample = [
+    'demo@studio ~ % pwd', '/Users/demo', '',
+    'demo@studio ~ % ls', 'Documents    Downloads    Projects', '',
+    'demo@studio ~ % ls Projects', 'OpenRemote   notes', '',
+    'demo@studio ~ % ',
+  ].join('\r\n');
+  await hostExample.evaluate(text => window.__rendererSmoke.emit({type:'local-terminal-output', payload:{text}}), sample);
+  await until(() => examplePainted, 'the real terminal renders the example output');
+  const image = await hostExample.screenshot();
+  await hostExample.close();
+  await pages.host.evaluate(async png => {
+    const frame = new Image();
+    frame.src = 'data:image/png;base64,' + png;
+    await frame.decode();
+    window.__rendererSmoke.terminalFrame = frame;
+  }, image.toString('base64'));
+  const viewer = pages.viewer;
+  let approveTerminal;
+  terminalApproval = new Promise(resolve => { approveTerminal = resolve; });
+  const sshCount = sshLaunches.length;
+  await consoles.viewer.getByRole('button', {name:'远程终端'}).click();
+  await viewer.getByRole('heading', {name:'等待机主确认'}).waitFor();
+  assert.ok(await viewer.getByRole('checkbox', {name:'终端输入'}).isDisabled());
+  assert.equal(states.host.session, null);
+  const captures = () => pages.host.evaluate(() => window.__rendererSmoke.captureRequests.map(request => request.video.mandatory.chromeMediaSource));
+  assert.deepEqual(await captures(), ['desktop'], 'the host waits for consent before capturing the terminal');
+  approveTerminal();
+  await viewer.waitForFunction(() => !document.getElementById('keyboard-input').disabled);
+  assert.deepEqual(await captures(), ['desktop', 'tab'], 'the terminal uses only the dedicated tab source');
+  await viewer.setViewportSize({width:1280,height:832});
+  await viewer.waitForFunction(() => document.getElementById('remote-video').getVideoPlaybackQuality().totalVideoFrames >= 10);
+  await viewer.screenshot({path:path.join(artifacts,'openremote-terminal.png')});
+  assert.equal(sshLaunches.length, sshCount, 'paired terminal uses no SSH profile or native launcher');
+  await indicator.evaluate(session => window.__rendererSmoke.emit({type:'state', payload:{session}}), states.host.session);
+  await indicator.getByText('正在共享本机终端').waitFor();
+  await indicator.getByText('对方可输入命令').waitFor();
+  const paste = text => viewer.locator('#keyboard-input').evaluate((el, text) => {
+    const data = new DataTransfer();
+    data.setData('text/plain', text);
+    el.dispatchEvent(new ClipboardEvent('paste', {clipboardData:data, bubbles:true, cancelable:true}));
+  }, text);
+  const terminalInputs = () => inputs.filter(event => event.sessionId === 'terminal-smoke-session');
+  await viewer.mouse.click(point.x, point.y);
+  await paste('无效\0粘贴');
+  await viewer.getByText('文本含有空字符，请移除后再粘贴。').waitFor();
+  await paste('字'.repeat(6000));
+  await viewer.getByText('文本过长，请分段粘贴，每次最多 16 KiB。').waitFor();
+  await paste('粘贴测试');
+  await viewer.keyboard.press('Enter');
+  await viewer.mouse.wheel(0, 120);
+  await until(() => terminalInputs().some(event => event.type === 'scroll'), 'terminal scroll delivered');
+  assert.deepEqual(terminalInputs().filter(event => event.type === 'text').map(event => event.text), ['粘贴测试']);
+  assert.ok(terminalInputs().some(event => event.code === 'Enter' && event.state === 'up'));
+  assert.ok(terminalInputs().every(event => !['button', 'move'].includes(event.type)));
+  await hostViewOnly.check();
+  await until(() => viewerControl.isDisabled(), 'host can restrict a paired terminal to viewing');
+  const terminalCount = terminalInputs().length;
+  await paste('仅可观看');
+  await viewer.keyboard.press('KeyB');
+  await pause(100);
+  assert.ok(terminalInputs().slice(terminalCount).every(event => event.type === 'release'));
+  await indicator.close();
+  await viewer.locator('#disconnect').click();
   assert.equal(errors.length, 0, `no uncaught renderer errors: ${errors.join('; ')}`);
   const report = {
     passed: true, browser: browser.version(), video: videoMetrics, signals,
@@ -597,6 +681,7 @@ try {
     inputEvents: inputs.length,
     healthReports: healthReports.length,
     interactionRegressions: [
+      'paired terminal waits for consent, captures only the tab, supports bounded plain-text paste and enforces view-only',
       'standalone and offline peer SSH, asynchronous profile ordering, keyboard submission, launcher retry and settings feedback',
       'grouped pairing-code entry preserves leading zeros and rejects extra digits',
       'copy action only while the local pairing code is active',

@@ -2,11 +2,11 @@
 const SESSION_ID = /^[a-f0-9-]{36}$/;
 class SessionPolicy {
   constructor() { this.active = null; }
-  begin({ peer, sessionId, role, hostEnabled, inputPolicyVersion }) {
+  begin({ peer, sessionId, role, kind = 'desktop', hostEnabled, inputPolicyVersion }) {
     if (this.active) throw new Error('已有会话，请先断开。');
-    if (!peer || !SESSION_ID.test(sessionId) || !['host', 'viewer'].includes(role)) throw new Error('无效会话。');
+    if (!peer || !SESSION_ID.test(sessionId) || !['host', 'viewer'].includes(role) || !['desktop', 'terminal'].includes(kind)) throw new Error('无效会话。');
     if (role === 'host' && (!hostEnabled || peer.allowControl !== true)) throw new Error('此设备未获准控制本机。');
-    this.active = { peerId: peer.id, peerName: peer.name, sessionId, role, connected: false, lastAlive: Date.now(),
+    this.active = { peerId: peer.id, peerName: peer.name, sessionId, role, kind, connected: false, lastAlive: Date.now(),
       viewOnly: false, inputRevision: 0, supportsInputPolicy: inputPolicyVersion === 1 };
     return this.active;
   }
