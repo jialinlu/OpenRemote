@@ -11,6 +11,26 @@ OpenRemote 支持 **Windows x64** 和 **Apple Silicon macOS**。已配对电脑�
 | macOS · Apple Silicon | [下载 DMG 安装包](https://github.com/jialinlu/OpenRemote/releases/download/v0.3.5/OpenRemote-0.3.5-macos-arm64.dmg) |
 | Windows · x64 | [下载 EXE 安装包](https://github.com/jialinlu/OpenRemote/releases/download/v0.3.5/OpenRemote-0.3.5-windows-x64-setup.exe) · [下载 ZIP 便携版](https://github.com/jialinlu/OpenRemote/releases/download/v0.3.5/OpenRemote-0.3.5-windows-x64-portable.zip) |
 
+## 连接原理
+
+**「连接桌面」和配对设备的「远程终端」都通过协调服务建立连接，再用 WebRTC 传输画面和输入。默认优先尝试两台电脑直连。** 下图以被控电脑点击「启动连接服务」、两端成功直连为例。
+
+```mermaid
+flowchart LR
+    A["控制电脑"] <-->|信令| C["Cloudflare 临时公网入口"]
+    C <--> S["被控电脑上的协调服务"]
+    S <-->|信令| B["被控端应用"]
+    A <-->|WebRTC 画面与输入| B
+```
+
+1. **两端先接入同一个协调服务。** 点击「启动连接服务」后，应用在本机运行协调服务，并通过 Cloudflare 隧道生成临时公网地址。另一台电脑从连接文件取得这个地址，因此使用临时入口无需自备公网服务器。这个入口只承载设备在线状态、配对请求、连接协商和会话质量统计等信令。双方也可以改用自建的 WSS 协调服务。
+2. **两台电脑寻找可直达对方的线路。** 同一局域网内，画面和输入可以走内网。异地连接时，WebRTC 默认使用 Google 的 STUN 服务发现设备对外可见的地址，并尝试穿过路由器建立公网直连。直连成功后，桌面或终端画面从被控端发给控制端，键鼠输入沿同一条连接返回。
+3. **复杂网络可以配置 TURN 中继。** 0.3.5 默认只配置 STUN。如果路由器或防火墙阻止直连，这组默认配置就无法建立会话。配置 TURN 后，设备可以经中继服务器转发加密的画面和输入，转发会占用该服务器的带宽。也可以勾选「仅使用 TURN 中继」来验证中继线路。[自建协调服务与 TURN 的部署方法](docs/DEPLOYMENT.md)
+
+**查看本次会话走哪条线路**，请在会话窗口底部展开「连接详情」，查看「连接路径」。「点对点直连」涵盖局域网直连和跨公网直连，当前界面将两者显示为同一项。「TURN 中继」表示本次会话正在通过 TURN 服务器转发。
+
+设备页右上角的「SSH 终端」使用系统 OpenSSH 连接你填写的主机和端口，线路由本机网络和 SSH 配置决定。[系统 SSH 的使用方法](#使用系统-ssh-终端)
+
 ![设备列表中的连接桌面、远程终端和独立 SSH 入口](docs/images/console.png)
 
 ## 从源码运行
@@ -45,7 +65,7 @@ npm start
 
 在「设备与连接」页点击 **SSH 终端**，填写主机名或 IP 地址、端口（默认 22）和可选用户名，点击「打开终端」。也可以展开某台设备的「设备详情与授权」，为它单独记住 SSH 地址。密码、私钥口令和首次连接的主机指纹都在系统终端中处理。结束会话可在终端输入 `exit`。
 
-目标主机需要运行 SSH 服务，且控制电脑能通过当前网络或 VPN 到达该地址。目标可以是没有图形桌面的 Linux 服务器。桌面配对码和 SSH 登录是两套独立授权，OpenRemote 的临时连接入口用于已配对桌面和终端会话的信令。Windows 需要安装系统可选功能 **OpenSSH 客户端**。[Windows OpenSSH 说明](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh-overview)
+目标主机需要运行 SSH 服务，且控制电脑能通过当前网络或 VPN 到达该地址。目标可以是没有图形桌面的 Linux 服务器。系统 SSH 使用独立的登录凭据，按本机 SSH 配置连接目标地址，整个过程无需 OpenRemote 配对、协调服务、STUN 或 TURN。Windows 需要安装系统可选功能 **OpenSSH 客户端**。[Windows OpenSSH 说明](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh-overview)
 
 ![SSH 连接窗口的主机、端口和用户名输入框](docs/images/ssh.png)
 
@@ -56,7 +76,7 @@ npm start
 3. **回到被控电脑**，核对并确认请求，打开「允许远程访问」。macOS 首次使用需要在系统设置中授予屏幕录制和辅助功能权限。
 4. **在控制电脑的设备列表**，点击对方的「连接桌面」。按 `Shift + Esc` 可以释放远端键鼠、返回本地工具栏。已配对设备再次使用时可直接从列表连接。
 
-被控电脑需要保持登录、解锁且应用正在运行。临时服务重启后，公网地址可能变化，可以导出新连接文件更新入口。默认尝试 WebRTC 直连，严格 NAT 或企业网络可能需要自建 TURN。[使用与升级说明](docs/QUICKSTART.md) · [自建信令服务与 TURN](docs/DEPLOYMENT.md)
+被控电脑需要保持登录、解锁且应用正在运行。临时服务重启后，公网地址可能变化，可以导出新连接文件更新入口。[使用与升级说明](docs/QUICKSTART.md)
 
 ## 共享时由机主掌控
 
