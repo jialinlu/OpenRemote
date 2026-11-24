@@ -2,6 +2,15 @@
 
 OpenRemote 支持 **Windows x64** 和 **Apple Silicon macOS**。已配对电脑可以共享整个桌面，也可以在机主确认后只打开一个双方可见的命令行窗口。对于已有 SSH 服务的主机，可以从应用打开系统 SSH 客户端直接登录。
 
+## 下载
+
+当前版本 **0.3.5**。[版本说明与 SHA-256 校验值](https://github.com/jialinlu/OpenRemote/releases/tag/v0.3.5)
+
+| 平台 | 下载 |
+| --- | --- |
+| macOS · Apple Silicon | [下载 DMG 安装包](https://github.com/jialinlu/OpenRemote/releases/download/v0.3.5/OpenRemote-0.3.5-macos-arm64.dmg) |
+| Windows · x64 | [下载 EXE 安装包](https://github.com/jialinlu/OpenRemote/releases/download/v0.3.5/OpenRemote-0.3.5-windows-x64-setup.exe) · [下载 ZIP 便携版](https://github.com/jialinlu/OpenRemote/releases/download/v0.3.5/OpenRemote-0.3.5-windows-x64-portable.zip) |
+
 ![设备列表中的连接桌面、远程终端和独立 SSH 入口](docs/images/console.png)
 
 ## 从源码运行
