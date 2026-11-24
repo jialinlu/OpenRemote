@@ -430,3 +430,18 @@ test('requesting a paired terminal sends only the new message type and closing c
   await app.control('disconnect',result.sessionId);
   assert.ok(app.received().some(m => m.type === 'session-end' && m.payload.sessionId === result.sessionId));
 });
+
+test('a failed disk write while revoking access still closes the shared terminal', async t => {
+  const windows = [];
+  const app = await desktop(t, {terminalDialog:async () => ({response:1}),terminalWindows:windows});
+  await app.pair();
+  app.fromPeer('terminal-request', {sessionId:randomUUID(),inputPolicyVersion:1});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal((await app.control('snapshot')).session.kind,'terminal');
+  app.failWrites();
+  await assert.rejects(app.control('peer-control', app.peer.id, false), /设置保存失败/);
+  assert.ok(windows[0].disposed);
+  assert.equal((await app.control('snapshot')).session,null);
+  await assert.rejects(app.control('peer-control', app.peer.id, true), /disk failure/);
+  assert.equal((await app.control('snapshot')).peers[0].allowControl,false);
+});

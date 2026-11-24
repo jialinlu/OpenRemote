@@ -278,7 +278,7 @@ function stopSession(reason = '会话已断开。', notify = true) {
   consent.clear();
   const current = gate.end();
   const terminal = hostTerminal; hostTerminal = undefined;
-  terminal?.dispose();
+  try { terminal?.dispose(); } catch { /* Finish closing the network session even if the local process already exited. */ }
   if (win && !win.isDestroyed()) win.webContents.setIgnoreMenuShortcuts(false);
   clearTimeout(sessionTimer); if (current?.kind !== 'terminal') native?.release();
   if (wakeLock !== undefined && powerSaveBlocker.isStarted(wakeLock)) powerSaveBlocker.stop(wakeLock);
@@ -675,10 +675,19 @@ function setupIpc() {
   });
   bind('peer-control', (id, enabled) => {
     const peer = peerFor(id); if (!peer) throw new Error('设备未配对。');
-    peer.allowControl = enabled === true;
-    if (!peer.allowControl) cancelTerminalRequest(id);
-    persist();
-    if (!peer.allowControl && gate.active?.peerId === id && gate.active.role === 'host') stopSession('本机已关闭此设备的控制权限。');
+    if (enabled === true) {
+      const previous = peer.allowControl;
+      peer.allowControl = true;
+      try { persist(); } catch (error) { peer.allowControl = previous; throw error; }
+    } else {
+      peer.allowControl = false;
+      cancelTerminalRequest(id);
+      if (gate.active?.peerId === id && gate.active.role === 'host') stopSession('本机已关闭此设备的控制权限。');
+      try { persist(); } catch {
+        changed();
+        throw new Error('本次运行已关闭此设备的控制权限，但设置保存失败。请检查磁盘空间并在重启前重试。');
+      }
+    }
     changed();
   });
   function requestSession(id, kind) {
