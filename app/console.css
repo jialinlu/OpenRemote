@@ -272,6 +272,11 @@ dialog::backdrop { background: #0006; }
 #pair-input { font-size: 19px; font-variant-numeric: tabular-nums; letter-spacing: .09em; }
 #pair-input::placeholder { font-size: 14px; letter-spacing: normal; }
 #pair-submit { width: 100%; margin-top: 16px; }
+#ssh-peer { margin-top: 5px; color: var(--or-brand-text); overflow-wrap: anywhere; }
+#ssh-fields { display: grid; grid-template-columns: minmax(0, 1fr) 82px; gap: 12px; margin: 16px 0 10px; padding: 0; border: 0; min-width: 0; }
+#ssh-fields label { min-width: 0; font-size: 13px; font-weight: 550; }
+#ssh-fields label:last-child { grid-column: 1 / -1; }
+.ssh-actions { display: flex; justify-content: flex-end; margin-top: 16px; }
 #toast { position: fixed; left: 50%; bottom: 24px; z-index: 2; transform: translateX(-50%); max-width: min(600px, 80vw); padding: 9px 16px; border-radius: 6px; color: var(--or-surface); background: var(--or-text); box-shadow: 0 4px 16px #0002; font-size: 13px; overflow-wrap: anywhere; }
 
 @media (max-width:1050px) {

@@ -54,17 +54,20 @@ const origin = `http://127.0.0.1:${server.address().port}`;
 const sides = ['host', 'viewer'];
 const ids = { host: '1'.repeat(64), viewer: '2'.repeat(64) };
 const names = { host: '合成画面测试端', viewer: 'OpenRemote 测试设备' };
+const { version } = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
 const states = Object.fromEntries(sides.map(side => [side, {
   self: { id: ids[side], name: names[side] },
   settings: { name: names[side], connectionMode: 'join', relayUrl: 'ws://127.0.0.1:8787', quality: 'balanced', iceServers: [], hostEnabled: true, autoLaunch: false, displayId: '', relayOnly: false },
   quickConnect: { status: 'stopped', relayUrl: '', message: '' },
   peers: [], relay: { status: side === 'host' ? 'disconnected' : 'ready', message: '' },
   permissions: { screen: 'granted', input: true, inputError: '', platform: side === 'host' ? 'darwin' : 'win32' },
-  pairingUntil: 0, pending: [], outgoingPairs: [], session: null, lastSession: null, emergencyShortcutAvailable: true, version: '0.3.3',
+  pairingUntil: 0, pending: [], outgoingPairs: [], session: null, lastSession: null, emergencyShortcutAvailable: true, version,
 }]));
 const pages = {}, inputs = [], connected = new Set(), signals = {}, errors = [], healthReports = [], permissionsOpened = [];
 const pairActions = [];
 const submittedCodes = [];
+const sshProfiles = new Map(), sshLaunches = [];
+let nextSshRead, nextSshLaunch;
 let copiedCode;
 let delayedDisplayList;
 let browser, active = false;
@@ -83,6 +86,20 @@ async function endSessions() {
 async function invoke(side, method, args) {
   switch (method) {
     case 'snapshot': return states[side];
+    case 'getSshProfile': {
+      const response = nextSshRead;
+      nextSshRead = undefined;
+      return response || sshProfiles.get(args[0]) || {host:'', port:22, username:''};
+    }
+    case 'openSsh': {
+      const [peerId, profile] = args;
+      sshLaunches.push({peerId, profile});
+      const response = nextSshLaunch;
+      nextSshLaunch = undefined;
+      const result = response ? await response : {saved:true};
+      if (result.saved) sshProfiles.set(peerId, profile);
+      return result;
+    }
     case 'sessionReady': return true;
     case 'toggleFullscreen': return false;
     case 'importConnection': pairActions.push(method); return {invitation:'synthetic',name:'测试设备',number:'12345678',paired:false};
@@ -181,6 +198,42 @@ try {
   }
   const artifacts = path.join(root, 'artifacts');
   await mkdir(artifacts, { recursive: true });
+  // The system terminal and SSH server are outside this renderer test. Exercise
+  // the actual dialog and record only the destination passed to the stub.
+  const sshPage = pages.host;
+  const directSsh = sshPage.getByRole('button', { name: 'SSH 终端' });
+  const sshDialog = sshPage.getByRole('dialog', { name: 'SSH 终端' });
+  const sshHost = sshDialog.getByLabel('主机地址');
+  let finishOldRead;
+  nextSshRead = new Promise(resolve => { finishOldRead = resolve; });
+  await directSsh.click();
+  await until(() => nextSshRead === undefined, 'delayed SSH settings requested');
+  await sshPage.keyboard.press('Escape');
+  await directSsh.click();
+  await sshHost.fill('server.example.test');
+  finishOldRead({ host: 'outdated.example.test', port: 24, username: 'old' });
+  await sshDialog.getByLabel('端口').fill('2222');
+  assert.equal(await sshHost.inputValue(), 'server.example.test', 'stale SSH settings cannot replace an edited destination');
+  assert.equal(await sshDialog.locator('input[type=password]').count(), 0);
+  let failLaunch;
+  nextSshLaunch = new Promise((_, reject) => { failLaunch = reject; });
+  await sshHost.press('Enter');
+  await until(() => sshLaunches.length === 1, 'SSH launch from the keyboard');
+  assert.ok(await sshDialog.locator('button[type=submit]').isDisabled());
+  await sshPage.keyboard.press('Escape');
+  assert.ok(await sshDialog.isVisible());
+  failLaunch(new Error('模拟系统终端不可用'));
+  await sshDialog.getByText('模拟系统终端不可用').waitFor();
+  assert.equal(await sshHost.inputValue(), 'server.example.test');
+  await sshDialog.getByRole('button', { name: '打开终端' }).click();
+  await sshDialog.waitFor({ state: 'hidden' });
+  assert.deepEqual(sshLaunches[1], {peerId:null, profile:{host:'server.example.test', port:2222, username:''}});
+  assert.equal(await directSsh.evaluate(el => document.activeElement === el), true, 'SSH returns focus to its opener');
+  await directSsh.click();
+  await sshPage.waitForFunction(() => document.getElementById('ssh-host').value === 'server.example.test');
+  assert.equal(await sshDialog.getByLabel('端口').inputValue(), '2222');
+  await sshPage.keyboard.press('Escape');
+  assert.ok(!active && states.host.peers.length === 0 && states.host.relay.status === 'disconnected');
   const indicator = await browser.newPage({ viewport: { width: 430, height: 176 } });
   const indicatorActions = [];
   const sharedSession = { role: 'host', connected: true, sessionId: 'test-sharing', peerName: '测试笔记本' };
@@ -290,6 +343,24 @@ try {
   assert.deepEqual(await consoles.viewer.locator('.device-state').allTextContents(), Array(3).fill('状态未知'));
   assert.equal(await consoles.viewer.locator('.device-recovery:visible').count(), 0);
   await consoles.viewer.screenshot({ path: path.join(artifacts, 'openremote-service-offline.png') });
+  const offlinePeer = consoles.viewer.getByRole('article', { name:'出差笔记本' });
+  const peerDetails = offlinePeer.getByRole('button', {name:'设备详情与授权'});
+  await peerDetails.click();
+  await offlinePeer.getByRole('button', { name:'SSH 终端' }).click();
+  const peerDialog = consoles.viewer.getByRole('dialog', {name:'SSH 终端'});
+  await peerDialog.getByText('设备 · 出差笔记本').waitFor();
+  await consoles.viewer.waitForFunction(() => !document.getElementById('ssh-fields').disabled);
+  assert.equal(await peerDialog.getByLabel('主机地址').inputValue(), '', 'peer name and relay address are never used as an SSH host');
+  await peerDialog.getByLabel('主机地址').fill('notebook.example.test');
+  await peerDialog.getByLabel('用户名（可选）').fill('demo');
+  await consoles.viewer.setViewportSize({ width: 900, height: 650 });
+  await consoles.viewer.screenshot({path:path.join(artifacts,'openremote-ssh.png')});
+  await consoles.viewer.setViewportSize({ width: 1240, height: 850 });
+  nextSshLaunch = Promise.resolve({saved:false});
+  await peerDialog.getByRole('button', { name: '打开终端' }).click();
+  await consoles.viewer.getByText('系统终端已打开，本次连接设置未能保存。').waitFor();
+  assert.deepEqual(sshLaunches.at(-1), {peerId:'4'.repeat(64), profile:{host:'notebook.example.test', port:22, username:'demo'}});
+  await peerDetails.click();
   states.viewer.relay.status = 'ready';
   states.viewer.peers[1].online = null;
   await refresh('viewer');
@@ -526,6 +597,7 @@ try {
     inputEvents: inputs.length,
     healthReports: healthReports.length,
     interactionRegressions: [
+      'standalone and offline peer SSH, asynchronous profile ordering, keyboard submission, launcher retry and settings feedback',
       'grouped pairing-code entry preserves leading zeros and rejects extra digits',
       'copy action only while the local pairing code is active',
       'local service outages leave device presence unknown',

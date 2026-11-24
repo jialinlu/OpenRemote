@@ -9,6 +9,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import vm from 'node:vm';
 import protocol from '../shared/protocol.cjs';
+import ssh from '../shared/ssh.cjs';
 
 const mainFile = fileURLToPath(new URL('../app/main.cjs', import.meta.url));
 const requireMain = createRequire(mainFile);
@@ -17,7 +18,7 @@ const oldUrl = 'wss://old.example/', nextUrl = 'wss://next.example/';
 
 // Exercise the real IPC handlers and signed messages using synthetic displays,
 // memory-only relay transports and a temporary directory. No OS input or capture.
-async function desktop(t) {
+async function desktop(t, { openSshTerminal = async () => { throw new Error('Unexpected terminal launch'); } } = {}) {
   const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'openremote-flow-'));
   t.after(() => fs.rm(folder, {recursive:true, force:true}));
   const handlers = new Map(), windows = new Map(), clients = new Map(), availability = new Map();
@@ -70,6 +71,7 @@ async function desktop(t) {
     desktopCapturer:{getSources:async()=>{ captures++; return displays.map(d=>({id:'source-'+d.id, display_id:String(d.id)})); }},
   };
   const replacements = new Map([['electron', electron], ['../shared/relay-client.cjs', {RelayClient:Client}],
+    ['../shared/ssh.cjs', { normalizeSshProfile: ssh.normalizeSshProfile, openSshTerminal }],
     ['../shared/quick-connect.cjs', {QuickConnect:EventEmitter}], ['../shared/input.cjs', {NativeInput:class extends EventEmitter {
       start(){ this.trusted = true; } write(){}
       release(){ nativeEvents.push('release'); }
@@ -127,6 +129,51 @@ test('copying a pairing code writes only the current eight digits during the pai
   assert.deepEqual(app.clipboardWrites, [pairingCode]);
 });
 
+test('SSH profiles stay local, work without a relay, and are forgotten on unpair', async t => {
+  const launched = [];
+  const app = await desktop(t, { openSshTerminal: async profile => launched.push(profile) });
+  const profile = { host: 'server.example.test', port: 2222, username: 'operator' };
+  const other = { host: 'lab.example.test', port: 22, username: '' };
+  const blank = { host: '', port: 22, username: '' };
+  const read = async id => ({ ...await app.control('get-ssh-profile', id) });
+  assert.deepEqual(await read(null), blank);
+  await assert.rejects(app.control('get-ssh-profile', app.peer.id), /配对/);
+  await app.pair();
+  const relay = app.clients.get(oldUrl);
+  relay.close();
+  assert.equal((await app.control('snapshot')).peers[0].online, null);
+  assert.deepEqual(await read(app.peer.id), blank);
+  assert.equal((await app.control('open-ssh', null, profile)).saved, true);
+  assert.equal((await app.control('open-ssh', app.peer.id, other)).saved, true);
+  assert.deepEqual(launched, [profile, other]);
+  assert.deepEqual(await read(null), profile);
+  assert.deepEqual(await read(app.peer.id), other);
+  const snapshot = await app.control('snapshot');
+  assert.equal(snapshot.session, null);
+  assert.equal(app.captureCount(), 0);
+  assert.equal(JSON.stringify(snapshot).includes('server.example.test'), false);
+  assert.equal(JSON.stringify(snapshot).includes('lab.example.test'), false);
+  await app.control('revoke', app.peer.id);
+  await assert.rejects(app.control('open-ssh', app.peer.id, other), /配对/);
+  relay.connect(oldUrl);
+  await app.pair();
+  assert.deepEqual(await read(app.peer.id), blank);
+});
+
+test('SSH launch and preference errors preserve the previous profile', async t => {
+  let failLaunch = false;
+  const app = await desktop(t, { openSshTerminal: async () => { if (failLaunch) throw new Error('terminal unavailable'); } });
+  const first = { host: 'first.example.test', port: 22, username: '' };
+  const next = { ...first, host: 'second.example.test' };
+  await app.control('open-ssh', null, first);
+  failLaunch = true;
+  await assert.rejects(app.control('open-ssh', null, next), /terminal unavailable/);
+  failLaunch = false;
+  app.failWrites();
+  assert.equal((await app.control('open-ssh', null, next)).saved, false, 'terminal launched even though the preference could not be written');
+  assert.deepEqual({ ...await app.control('get-ssh-profile', null) }, first);
+});
+
 test('a missing selected monitor never acquires the primary screen', async t => {
   const app = await desktop(t); await app.pair(); app.remove(2);
   const id = randomUUID(); app.fromPeer('session-request', {sessionId:id});
@@ -147,6 +194,10 @@ test('hot-unplug only stops the selected display and the indicator only acts on 
   await assert.rejects(app.call('sharing.html', 'save-settings', {}), /Unauthorized/);
   await assert.rejects(app.call('sharing.html', 'copy-pair-code'), /Unauthorized/);
   await assert.rejects(app.call('session.html', 'copy-pair-code'), /Unauthorized/);
+  for (const caller of ['sharing.html', 'session.html']) {
+    await assert.rejects(app.call(caller, 'get-ssh-profile', null), /Unauthorized/);
+    await assert.rejects(app.call(caller, 'open-ssh', null, {host:'example.test'}), /Unauthorized/);
+  }
   app.remove(1); assert.equal((await app.control('snapshot')).session.sessionId, id);
   app.remove(2); assert.equal((await app.control('snapshot')).session, null);
 });

@@ -2,6 +2,7 @@
 const $ = id => document.getElementById(id);
 const api = window.bridge;
 let state, toastTimer, pairTarget, connectingId;
+let sshTarget;
 let setupRole = 'viewer', setupExpanded = false;
 let trackedSessionId, wasConnected = false;
 let settingsDirty = false, serviceBusy = false, submittingPair = false;
@@ -144,7 +145,11 @@ function peerRow(id) {
   const revoke = button('解除配对', 'text-button remove-peer', async () => {
     if (confirm('解除与「' + name.textContent + '」的配对？下次连接需要重新配对。')) await api.revoke(id);
   }, feedback);
-  details.append(number, label, revoke);
+  const ssh = button('SSH 终端', 'secondary compact', () => openSshDialog(id, name.textContent), feedback);
+  ssh.setAttribute('aria-haspopup', 'dialog');
+  ssh.setAttribute('aria-controls', 'ssh-dialog');
+  ssh.setAttribute('aria-describedby', name.id);
+  details.append(number, label, ssh, revoke);
   const last = node('p', 'recent-result');
   const recovery = node('div', 'device-recovery');
   recovery.append(reason, repair);
@@ -382,6 +387,65 @@ async function setService(enable) {
     render(await api.snapshot());
   }
 }
+async function openSshDialog(peerId = null, name = '') {
+  const dialog = $('ssh-dialog');
+  const target = { peerId, opening: false };
+  sshTarget = target;
+  $('ssh-form').reset();
+  $('ssh-fields').disabled = $('ssh-submit').disabled = true;
+  $('close-ssh').disabled = false;
+  write($('ssh-submit'), '打开终端');
+  message($('ssh-peer'), name ? '设备 · ' + name : '');
+  message($('ssh-feedback'), '正在读取连接设置…');
+  dialog.showModal();
+  try {
+    const profile = await api.getSshProfile(peerId);
+    if (!dialog.open || sshTarget !== target) return;
+    $('ssh-host').value = profile.host;
+    $('ssh-port').value = profile.port;
+    $('ssh-username').value = profile.username;
+    message($('ssh-feedback'));
+  } catch (error) {
+    if (dialog.open && sshTarget === target) message($('ssh-feedback'), errorMessage(error), true);
+  } finally {
+    if (dialog.open && sshTarget === target) {
+      $('ssh-fields').disabled = $('ssh-submit').disabled = false;
+      $('ssh-host').focus();
+    }
+  }
+}
+async function submitSsh(event) {
+  event.preventDefault();
+  const target = sshTarget;
+  if (!target || $('ssh-submit').disabled) return;
+  const profile = { host: $('ssh-host').value.trim(), port: $('ssh-port').valueAsNumber, username: $('ssh-username').value.trim() };
+  target.opening = true;
+  $('ssh-fields').disabled = $('ssh-submit').disabled = $('close-ssh').disabled = true;
+  write($('ssh-submit'), '正在打开…');
+  message($('ssh-feedback'));
+  try {
+    const { saved } = await api.openSsh(target.peerId, profile);
+    $('ssh-dialog').close();
+    toast(saved ? '系统终端已打开，请在终端完成 SSH 登录。' : '系统终端已打开，本次连接设置未能保存。');
+  } catch (error) {
+    message($('ssh-feedback'), errorMessage(error), true);
+  } finally {
+    target.opening = false;
+    $('ssh-fields').disabled = $('ssh-submit').disabled = $('close-ssh').disabled = false;
+    write($('ssh-submit'), '打开终端');
+    if ($('ssh-dialog').open) $('ssh-host').focus();
+  }
+}
+$('open-ssh').addEventListener('click', () => openSshDialog());
+$('close-ssh').addEventListener('click', () => $('ssh-dialog').close());
+$('ssh-dialog').addEventListener('cancel', event => { if (sshTarget?.opening) event.preventDefault(); });
+$('ssh-dialog').addEventListener('close', () => {
+  if ($('ssh-dialog').open) return;
+  sshTarget = null;
+  if (document.activeElement === document.body) $('open-ssh').focus();
+});
+$('ssh-form').addEventListener('submit', submitSsh);
+
 function openPairDialog(item, resultFeedback = $('import-feedback')) {
   pairTarget = { ...item, resultFeedback };
   const updating = !!item.paired;

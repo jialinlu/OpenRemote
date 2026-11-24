@@ -99,6 +99,9 @@ try {
   assert.equal(await remotePage.locator('#send-text').count(),0);
   await assert.rejects(remotePage.evaluate(() => window.bridge.pairMode(true)),/Unauthorized IPC/);
   await assert.rejects(remotePage.evaluate(() => window.bridge.copyPairCode()), /Unauthorized IPC/);
+  await assert.rejects(remotePage.evaluate(() => window.bridge.getSshProfile(null)), /Unauthorized IPC/);
+  await assert.rejects(remotePage.evaluate(() => window.bridge.openSsh(null, { host: 'example.test' })), /Unauthorized IPC/);
+  assert.deepEqual(await page.evaluate(() => window.bridge.getSshProfile(null)), {host:'', port:22, username:''});
   await assert.rejects(remotePage.evaluate(id => window.bridge.setSessionViewOnly(id, false), session.sessionId), /Unauthorized IPC/);
   await assert.rejects(page.evaluate(id => window.bridge.setSessionViewOnly(id, false), session.sessionId), /Unauthorized IPC/);
   await assert.rejects(page.evaluate(id => window.bridge.signal(id,'offer',{}),session.sessionId),/Unauthorized IPC/);

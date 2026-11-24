@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 const methods = ['snapshot', 'save-settings', 'copy-invitation', 'pair', 'pair-mode', 'approve-pair', 'reject-pair', 'revoke', 'peer-control', 'connect', 'disconnect', 'signal', 'capture-source', 'input', 'session-connected', 'session-alive', 'permissions', 'open-permissions', 'list-displays', 'start-quick-connect', 'stop-quick-connect'];
 const api = {};
 methods.push('copy-pair-code');
+methods.push('get-ssh-profile', 'open-ssh');
 methods.push('session-stats', 'session-ready', 'show-session', 'toggle-fullscreen', 'export-connection', 'import-connection');
 methods.push('retry-pair', 'cancel-pair', 'pause-hosting', 'session-failed', 'set-session-view-only');
 for (const name of methods) api[name.replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = (...args) => ipcRenderer.invoke(`bridge:${name}`, ...args);

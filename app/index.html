@@ -26,7 +26,10 @@
     <section class="page" id="page-devices">
       <div class="page-heading heading-row">
         <div><h1 tabindex="-1">设备与连接</h1><p id="device-intro">选择这台电脑要做的事。</p></div>
-        <button class="secondary add-button" id="show-setup" aria-controls="setup-panel" aria-expanded="false" hidden>添加设备</button>
+        <div class="button-row">
+          <button class="secondary" id="open-ssh" type="button" aria-haspopup="dialog" aria-controls="ssh-dialog">SSH 终端</button>
+          <button class="secondary add-button" id="show-setup" aria-controls="setup-panel" aria-expanded="false" hidden>添加设备</button>
+        </div>
       </div>
       <div class="active-session" id="active-session" hidden>
         <span class="live-dot" aria-hidden="true"></span><strong id="active-label"></strong><span class="security-badge" id="connection-security" hidden>端到端加密</span>
@@ -135,6 +138,21 @@
     </section>
 
   </main>
+  <dialog id="ssh-dialog" aria-labelledby="ssh-title" aria-describedby="ssh-intro">
+    <form id="ssh-form">
+      <div class="dialog-head"><h2 id="ssh-title">SSH 终端</h2><button class="icon-button" type="button" id="close-ssh" aria-label="关闭 SSH 终端设置">×</button></div>
+      <p id="ssh-intro">通过本机系统终端直连已开启 SSH 服务的主机。</p>
+      <p id="ssh-peer" hidden></p>
+      <fieldset id="ssh-fields" aria-label="SSH 连接设置">
+        <label>主机地址<input id="ssh-host" required spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="主机名或 IP 地址"></label>
+        <label>端口<input id="ssh-port" type="number" min="1" max="65535" step="1" value="22" required></label>
+        <label>用户名（可选）<input id="ssh-username" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="留空使用 SSH 默认用户"></label>
+      </fieldset>
+      <p class="field-help">首次连接请在终端核对主机指纹。需要密码或密钥口令时，也请在终端输入。</p>
+      <p id="ssh-feedback" class="inline-message" role="status" hidden></p>
+      <div class="ssh-actions"><button id="ssh-submit" class="primary" type="submit">打开终端</button></div>
+    </form>
+  </dialog>
   <dialog id="pair-dialog" aria-labelledby="pair-title">
     <form id="pair-form">
       <div class="dialog-head"><h2 id="pair-title">配对设备</h2><button class="icon-button" type="button" id="close-pair" aria-label="关闭">×</button></div>

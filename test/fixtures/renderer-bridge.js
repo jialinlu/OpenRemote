@@ -13,7 +13,8 @@
   const names = ['snapshot', 'saveSettings', 'copyInvitation', 'copyPairCode', 'pair', 'pairMode', 'setSessionViewOnly',
     'approvePair', 'rejectPair', 'retryPair', 'cancelPair', 'revoke', 'peerControl', 'connect', 'disconnect', 'pauseHosting', 'sessionFailed',
     'signal', 'captureSource', 'input', 'sessionConnected', 'sessionAlive', 'sessionStats', 'permissions',
-    'openPermissions', 'listDisplays', 'startQuickConnect', 'stopQuickConnect', 'sessionReady', 'showSession', 'toggleFullscreen', 'exportConnection', 'importConnection'];
+    'openPermissions', 'listDisplays', 'startQuickConnect', 'stopQuickConnect', 'sessionReady', 'showSession', 'toggleFullscreen', 'exportConnection', 'importConnection',
+    'getSshProfile', 'openSsh'];
   window.bridge = Object.fromEntries(names.map(name => [name, (...args) => window.__smokeInvoke(name, args)]));
   window.bridge.onEvent = callback => {
     handlers.push(callback);

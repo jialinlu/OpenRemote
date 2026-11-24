@@ -14,6 +14,7 @@ const { QuickConnect } = require('../shared/quick-connect.cjs');
 const { PairingCode, deviceNumber } = require('../shared/pairing-code.cjs');
 const pairingCode = new PairingCode();
 const { cleanSessionStats } = require('../shared/diagnostics.cjs');
+const { normalizeSshProfile, openSshTerminal } = require('../shared/ssh.cjs');
 
 app.setName('bridgedesk'); // Stable OS key-store namespace; product name is OpenRemote.
 app.setAboutPanelOptions({ applicationName: 'OpenRemote', applicationVersion: app.getVersion() });
@@ -24,6 +25,7 @@ let sharingWin, lastSession = null, emergencyShortcutAvailable = false;
 let win, data, relay, native, pairingUntil = 0, sessionTimer, wakeLock, quitting = false, locked = false, suspended = false;
 let relayState = { status: 'disconnected', message: '' };
 let quickConnect, tray, backgroundWakeLock, pairBusy = false, shutdownStarted = false;
+let sshOpening = false;
 let localStats = null, remoteStats = null, lastStatsSentAt = 0, diagnosticTimer;
 const DEFAULT_ICE = [{ urls: 'stun:stun.l.google.com:19302' }];
 const gate = new SessionPolicy();
@@ -208,6 +210,21 @@ async function stopQuickConnect() {
   persist(); relayConnect(); await quickConnect.stop(); syncBackgroundWakeLock(); changed(); return snapshot();
 }
 function peerFor(id) { return data.peers.find(p => p.id === id); }
+function sshProfileKey(peerId) {
+  if (peerId == null) return 'direct';
+  if (!peerFor(peerId)) throw new Error('设备已解除配对，请从设备页的「SSH 终端」直接连接。');
+  return peerId;
+}
+function forgetPeer(id) {
+  const peers = data.peers, profiles = data.sshProfiles;
+  data.peers = peers.filter(peer => peer.id !== id);
+  if (profiles && Object.hasOwn(profiles, id)) {
+    data.sshProfiles = { ...profiles };
+    delete data.sshProfiles[id];
+  }
+  try { persist(); }
+  catch (error) { data.peers = peers; data.sshProfiles = profiles; throw error; }
+}
 function send(peer, type, payload) { relay.send({ type: 'relay', to: peer.id, envelope: protocol.seal(data.identity, peer, type, payload) }); }
 function expireOutgoing(now) {
   let expired = false;
@@ -369,7 +386,7 @@ async function receive(message) {
   if (type === 'pair-accepted') return;
   if (type === 'revoke') {
     if (gate.active?.peerId === peer.id) stopSession('对方已解除配对。', false);
-    data.peers = data.peers.filter(p => p.id !== peer.id); persist(); changed(); return;
+    forgetPeer(peer.id); changed(); return;
   }
   if (type === 'session-request') {
     try {
@@ -402,6 +419,28 @@ function bind(name, fn) {
 }
 function setupIpc() {
   bind('snapshot', snapshot);
+  bind('get-ssh-profile', peerId => {
+    const key = sshProfileKey(peerId);
+    const saved = data.sshProfiles?.[key];
+    if (saved) return normalizeSshProfile(saved);
+    return { host: '', port: 22, username: '' };
+  });
+  bind('open-ssh', async (peerId, input) => {
+    const key = sshProfileKey(peerId);
+    const peer = peerFor(peerId);
+    const profile = normalizeSshProfile(input);
+    if (sshOpening) throw new Error('正在打开 SSH 终端，请稍候。');
+    sshOpening = true;
+    try {
+      await openSshTerminal(profile);
+      if (peer && peerFor(peerId) !== peer) return { saved: false };
+      const previous = data.sshProfiles;
+      data.sshProfiles = { ...previous, [key]: profile };
+      try { persist(); }
+      catch { data.sshProfiles = previous; return { saved: false }; }
+      return { saved: true };
+    } finally { sshOpening = false; }
+  });
   bind('session-ready', () => {
     if (!gate.active || !remoteWin) throw new Error('会话已结束。');
     remoteReady = true;
@@ -549,7 +588,7 @@ function setupIpc() {
     const peer = peerFor(id); if (!peer) return;
     if (gate.active?.peerId === id) stopSession('设备授权已撤销。');
     try { send(peer, 'revoke', {}); } catch {}
-    data.peers = data.peers.filter(p => p.id !== id); pendingOutgoing.delete(id); pendingIncoming.delete(id); persist(); changed();
+    forgetPeer(id); pendingOutgoing.delete(id); pendingIncoming.delete(id); changed();
   });
   bind('peer-control', (id, enabled) => {
     const peer = peerFor(id); if (!peer) throw new Error('设备未配对。');
