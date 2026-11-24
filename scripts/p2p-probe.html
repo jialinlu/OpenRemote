@@ -1,0 +1,478 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>BridgeDesk · 点对点连通性诊断</title>
+  <style>
+    :root{font:15px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;color:#203b32;background:#f3f6f2}*{box-sizing:border-box}body{margin:0}main{max-width:1060px;margin:auto;padding:40px 24px 64px}header{display:flex;justify-content:space-between;align-items:center;gap:18px;margin-bottom:26px}h1{font-size:27px;line-height:1.4;margin:4px 0 8px}h2{font-size:17px;margin:0 0 14px}p{margin:0;color:#65786d}.eyebrow{font-size:11px;letter-spacing:2px;color:#718979}.badge{background:#e6eee5;border:1px solid #d4e0d1;color:#52725c;padding:6px 11px;border-radius:18px;font-size:12px;white-space:nowrap}.card{padding:23px;background:white;border:1px solid #dce5d9;border-radius:13px;margin-bottom:18px}.notice{background:#eaf2e6;color:#536f51}.notice p{font-size:13px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.grid .card{margin:0}.status{display:flex;align-items:center;gap:10px;font-size:20px;font-weight:600;margin-bottom:12px}.dot{width:11px;height:11px;background:#b3bcaf;border-radius:50%;flex:none}.dot.busy{background:#bd8f37}.dot.ok{background:#2c8c57}.dot.bad{background:#b25a42}.facts{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;font-size:12px;color:#6a7b6c}.facts strong{display:block;font-size:15px;color:#34513e;font-weight:550;font-variant-numeric:tabular-nums}.actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:17px}button{font:inherit;font-size:13px;border:1px solid #ccd9c9;background:#f8faf7;border-radius:7px;padding:9px 14px;color:#395d42;cursor:pointer}button.primary{background:#236c49;border-color:#236c49;color:white}button.danger{color:#a24c3e;border-color:#e6c9c2;background:#fff7f4}button:disabled{opacity:.45;cursor:default}button:focus-visible,textarea:focus-visible,input:focus-visible{outline:3px solid #94c5a3;outline-offset:2px}textarea{display:block;width:100%;min-height:170px;resize:vertical;border:1px solid #d6e0d2;border-radius:7px;background:#fbfcfa;color:#3c5240;font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;padding:11px;overflow-wrap:anywhere}label{display:block;font-size:12px;color:#6c826c;margin:13px 0 7px}.help{font-size:12px;margin-top:11px;line-height:1.8}.warning{color:#956d2e}.file-label{display:inline-flex;margin:0;align-items:center;font-size:12px;gap:8px}input[type=file]{font:12px inherit;max-width:240px}pre{margin:0;padding:15px;background:#f5f8f2;border-radius:7px;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.7 ui-monospace,SFMono-Regular,Consolas,monospace;max-height:360px;overflow:auto}.error{margin:15px 0 0;padding:10px 13px;background:#fff2ec;border:1px solid #e9cfbf;border-radius:7px;color:#9c543b;font-size:13px}[hidden]{display:none!important}details{margin-top:18px}summary{cursor:pointer;font-size:13px;color:#597450;margin-bottom:10px}footer{font-size:12px;color:#83907e;margin-top:22px}code{font:12px ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}@media(max-width:720px){main{padding:24px 16px}header{align-items:flex-start}.grid{grid-template-columns:1fr}.facts{grid-template-columns:1fr 1fr}h1{font-size:23px}.badge{display:none}}
+  </style>
+</head>
+<body><main>
+  <header><div><div class="eyebrow">BRIDGEDESK / NETWORK DIAGNOSTIC</div><h1>点对点连通性诊断</h1><p>用有限的测试消息，检查两台电脑能否直接建立 WebRTC 连接。</p></div><span class="badge">数据通道 · 无远程控制</span></header>
+  <section class="card notice"><h2>本次测试的范围</h2><p>仅发送最多 10 轮随机挑战与响应，不读取屏幕、麦克风、摄像头或剪贴板；只读取手动选择的连接信息文件，不浏览其他文件。不发送键鼠指令，不执行远程命令，不配置 TURN 中继。默认使用 Google STUN 获取网络候选地址：STUN 服务会看到网络地址，不会收到测试应用消息。连接成功只证明这次数据流可达，不能证明远程桌面的帧率、画质或长期稳定性。</p></section>
+  <section class="card" aria-live="polite">
+    <div class="status"><span id="status-dot" class="dot"></span><span id="status">尚未开始</span></div>
+    <div class="facts"><div>测试到期时间<strong id="expires">尚未设置</strong></div><div>已验证往返<strong id="verified">0 / 10</strong></div><div>测试平均往返<strong id="rtt">—</strong></div><div>ICE 状态<strong id="ice">new</strong></div><div>数据通道<strong id="channel">尚未创建</strong></div><div>选中路径协议<strong id="route">尚未确定</strong></div></div>
+    <p id="progress" class="help">交换邀请和回答后，请保持两端页面打开。手动信令 JSON 含临时凭据及候选网络地址，只交给参与测试的另一台电脑。</p>
+    <div class="actions"><button id="start-embedded" class="primary" hidden>开始测试并生成 Windows 回答</button><button id="stop" class="danger" disabled>停止并关闭连接</button><button id="download-report">下载脱敏报告</button></div><div id="error" class="error" hidden></div>
+  </section>
+  <div class="grid">
+    <section class="card"><h2>1 · 导入邀请或回答</h2><p class="help">接收端导入 offer 并生成 answer；发起端将对方的 answer 导入同一页面。每个页面仅允许一次测试，重新测试请重新加载。</p><label for="incoming">信令 JSON</label><textarea id="incoming" maxlength="131072" spellcheck="false" autocomplete="off" placeholder="在此粘贴 offer / answer JSON"></textarea><div class="actions"><button id="import-offer" class="primary">导入 offer 并生成回答</button><button id="import-answer">导入 answer</button></div><div class="actions"><label class="file-label">选择信令文件<input id="import-file" type="file" accept=".json,application/json"></label></div><details><summary>手动发起一个新的测试</summary><p class="help">如果没有内嵌邀请，可创建有效期 30 分钟的新 offer，再把输出 JSON 交给另一台电脑。</p><button id="new-offer">创建新 offer</button></details></section>
+    <section class="card"><h2>2 · 将本机信令交给另一端</h2><p id="output-help" class="help">生成回答后下载 JSON 文件交回发起端。不要关闭本页面，数据通道需要两端持续运行。</p><label for="outgoing">本机输出</label><textarea id="outgoing" readonly spellcheck="false" placeholder="完整 ICE 候选收集结束后，输出将显示在这里"></textarea><div class="actions"><button id="download-answer" class="primary" disabled>下载 Windows-P2P-answer.json</button><button id="download-offer" disabled>下载 P2P-offer.json</button></div><p class="help warning">等待候选收集最多 15 秒。超时会标为“部分候选”，连接失败时不能据此断言网络一定无法直连。</p></section>
+  </div>
+  <section class="card" style="margin-top:18px"><h2>脱敏诊断记录</h2><p class="help" style="margin-bottom:12px">报告仅包含状态、计数、协议、候选类型和地址族，不包含临时密钥、SDP、完整 IP 地址或 ICE 凭据。未验证至少 3 次挑战响应之前，不会显示“已验证连通”。</p><pre id="report"></pre></section>
+  <footer>纯本地页面，无远程脚本、无 CDN、无遥测上传。报告保存在你选择下载的位置。页面过期或点击停止后会关闭 RTC 连接；关闭浏览器页面也会结束测试。</footer>
+</main>
+<script>
+'use strict';
+(() => {
+  const EMBEDDED_OFFER = /*__EMBEDDED_OFFER__*/ null;
+  const DEFAULT_ICE = [{ urls: 'stun:stun.l.google.com:19302' }];
+  const MAX_ENVELOPE = 128 * 1024, MAX_MESSAGE = 2048, MAX_MESSAGES = 200, MAX_DURATION = 120 * 60 * 1000;
+  const $ = id => document.getElementById(id);
+  const encoder = new TextEncoder();
+  const allowedStates = new Set(['new', 'checking', 'connected', 'completed', 'disconnected', 'failed', 'closed', 'connecting', 'open', 'closing', 'stable', 'have-local-offer', 'have-remote-offer', 'have-local-pranswer', 'have-remote-pranswer', 'gathering', 'complete']);
+  const report = {
+    version: 1, scope: 'webrtc-datachannel-only', role: null, sessionId: null, expiresAt: null,
+    startedAt: null, endedAt: null, answerCreatedAt: null, remoteDescriptionAppliedAt: null, status: 'idle', verifiedConnected: false,
+    outcome: 'not-started', connectionStateChanges: [],
+    connectionState: 'new', iceConnectionState: 'new', iceGatheringState: 'new', signalingState: 'stable', dataChannelState: 'none',
+    gathering: { complete: false, partial: false, elapsedMs: null },
+    counters: { sent: 0, received: 0, pingsSent: 0, pingsReceived: 0, pongsSent: 0, verifiedPongs: 0, duplicateMessages: 0, invalidMessages: 0 },
+    rttMs: { samples: [], min: null, max: null, mean: null }, selectedCandidatePair: null,
+    candidates: { local: { count: 0, types: {}, protocols: {}, addressFamilies: {} }, remote: { count: 0, types: {}, protocols: {}, addressFamilies: {} } },
+    iceErrors: [], warnings: [], events: [], thirdPartyStun: false,
+    limits: { maxPingsPerEndpoint: 10, maxMessages: MAX_MESSAGES, maxMessageBytes: MAX_MESSAGE, maxDurationMinutes: 120, iceGatheringTimeoutMs: 15000 },
+    exclusions: ['screen-capture', 'audio', 'video', 'keyboard-mouse', 'clipboard', 'file-transfer', 'remote-code', 'TURN-relay', 'screen-quality-assessment']
+  };
+  let pc = null, channel = null, metadata = null, output = null, used = false, closed = false, previewExpiry = null;
+  let expireTimer = null, pingTimer = null, statsTimer = null, renderTimer = null, cancelGather = null, statsBusy = false;
+  let trickleTimer = null, trickleCallback = null, localSignalsReady = false, localCandidateBuffer = [], trickleSendChain = Promise.resolve(), remoteCandidateCount = 0;
+  let nextSequence = 0;
+  const challenges = new Map(), verified = new Set(), receivedPings = new Map();
+  function ensure(condition, code) { if (!condition) throw new Error(code); }
+  function plain(value) { return value !== null && typeof value === 'object' && !Array.isArray(value) && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null); }
+  function randomHex(bytes = 16) { return Array.from(crypto.getRandomValues(new Uint8Array(bytes)), value => value.toString(16).padStart(2, '0')).join(''); }
+  function record(name) { if (report.events.length < 80) report.events.push({ at: new Date().toISOString(), event: name }); }
+  function warning(code) { if (!report.warnings.includes(code) && report.warnings.length < 16) report.warnings.push(code); }
+  function safeState(value) { return allowedStates.has(value) ? value : 'unknown'; }
+  function operationError(code) { const error = new Error(code); error.probeCode = code; return error; }
+  function publicError(error) {
+    const known = new Set(['PAGE_ALREADY_USED','ENVELOPE_TOO_LARGE','INVALID_ENVELOPE','INVALID_SESSION_ID','INVALID_EXPIRY','EXPIRED','EXPIRY_TOO_LONG','INVALID_SECRET','INVALID_DESCRIPTION','MEDIA_NOT_ALLOWED','INVALID_FINGERPRINT','INVALID_ICE_SERVERS','TURN_NOT_ALLOWED','NO_ACTIVE_OFFER','NO_REMOTE_DESCRIPTION','INVALID_CANDIDATE','CANDIDATE_LIMIT','METADATA_MISMATCH','CLOSED','WEBRTC_UNAVAILABLE','ICE_OPERATION_FAILED']);
+    return known.has(error?.message) ? error.message : (known.has(error?.probeCode) ? error.probeCode : 'ICE_OPERATION_FAILED');
+  }
+  const explanations = { PAGE_ALREADY_USED: '此页面已经用于一次测试，请重新加载后重试。', ENVELOPE_TOO_LARGE: '信令超过 128 KiB，已拒绝。', INVALID_ENVELOPE: '信令 JSON 格式不正确。', INVALID_SESSION_ID: '测试编号不正确。', INVALID_EXPIRY: '到期时间必须是有效的 ISO 时间。', EXPIRED: '测试邀请已到期，请生成新的邀请。', EXPIRY_TOO_LONG: '测试有效期不能超过 120 分钟。', INVALID_SECRET: '临时测试凭据格式不正确。', INVALID_DESCRIPTION: 'SDP 格式或信令类型不正确。', MEDIA_NOT_ALLOWED: '仅允许单个数据通道 SDP；音频和视频已拒绝。', INVALID_FINGERPRINT: 'SDP 缺少有效的 DTLS 指纹。', INVALID_ICE_SERVERS: 'STUN 配置格式不正确。', TURN_NOT_ALLOWED: '本诊断不允许 TURN 中继。', NO_ACTIVE_OFFER: '请先在此页面创建 offer。', METADATA_MISMATCH: '回答不属于当前测试，已拒绝。', CLOSED: '测试已经停止。', WEBRTC_UNAVAILABLE: '此浏览器不支持所需的 WebRTC API，请使用新版 Chrome 或 Edge。', ICE_OPERATION_FAILED: '浏览器无法完成此步骤，请检查信令文件和网络后重新加载。' };
+  function showError(error) { const code = publicError(error); $('error').textContent = explanations[code]; $('error').hidden = false; record(code); render(); }
+  function parseJSON(value) {
+    if (typeof value === 'string') {
+      ensure(encoder.encode(value).byteLength <= MAX_ENVELOPE, 'ENVELOPE_TOO_LARGE');
+      try { return JSON.parse(value); } catch { throw operationError('INVALID_ENVELOPE'); }
+    }
+    let encoded;
+    try { encoded = JSON.stringify(value); } catch { throw operationError('INVALID_ENVELOPE'); }
+    ensure(typeof encoded === 'string' && encoder.encode(encoded).byteLength <= MAX_ENVELOPE, 'ENVELOPE_TOO_LARGE');
+    return value;
+  }
+  function checkMetadata(value) {
+    ensure(plain(value), 'INVALID_ENVELOPE');
+    ensure(typeof value.sessionId === 'string' && /^[A-Za-z0-9_-]{8,80}$/.test(value.sessionId), 'INVALID_SESSION_ID');
+    ensure(typeof value.expiresAt === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(value.expiresAt), 'INVALID_EXPIRY');
+    const expiry = Date.parse(value.expiresAt);
+    ensure(Number.isFinite(expiry), 'INVALID_EXPIRY');
+    ensure(expiry > Date.now(), 'EXPIRED');
+    ensure(expiry - Date.now() <= MAX_DURATION, 'EXPIRY_TOO_LONG');
+    ensure(typeof value.secret === 'string' && /^[a-fA-F0-9]{32,128}$/.test(value.secret) && value.secret.length % 2 === 0, 'INVALID_SECRET');
+    return { sessionId: value.sessionId, expiresAt: value.expiresAt, secret: value.secret };
+  }
+  function checkDescription(description, kind) {
+    ensure(plain(description) && description.type === kind && typeof description.sdp === 'string' && description.sdp.length > 0, 'INVALID_DESCRIPTION');
+    ensure(!/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(description.sdp), 'INVALID_DESCRIPTION');
+    const lines = description.sdp.replace(/\r\n/g, '\n').split('\n');
+    ensure(lines[0] === 'v=0' && !lines.some(line => line.includes('\r')), 'INVALID_DESCRIPTION');
+    const media = lines.filter(line => line.startsWith('m='));
+    ensure(media.length === 1 && /^m=application\s+\d+\s+(?:UDP|TCP)\/DTLS\/SCTP\s+webrtc-datachannel\s*$/.test(media[0]), 'MEDIA_NOT_ALLOWED');
+    ensure(lines.some(line => /^a=sctp-port:\d+$/.test(line)), 'INVALID_DESCRIPTION');
+    ensure(!lines.some(line => /^a=candidate:.*\styp\s+relay(?:\s|$)/i.test(line)), 'TURN_NOT_ALLOWED');
+    ensure(lines.some(line => /^a=fingerprint:sha-256 (?:[0-9a-fA-F]{2}:){31}[0-9a-fA-F]{2}$/.test(line)), 'INVALID_FINGERPRINT');
+    return { type: kind, sdp: description.sdp };
+  }
+  function checkEnvelope(value, kind) {
+    const parsed = parseJSON(value);
+    ensure(plain(parsed) && parsed.version === 1 && parsed.kind === kind && Object.keys(parsed).length === 6, 'INVALID_ENVELOPE');
+    const meta = checkMetadata(parsed);
+    return { version: 1, kind, ...meta, description: checkDescription(parsed.description, kind) };
+  }
+  function checkIce(value) {
+    ensure(Array.isArray(value) && value.length <= 4, 'INVALID_ICE_SERVERS');
+    return value.map(server => {
+      ensure(plain(server) && typeof server.urls === 'string' && Object.keys(server).length === 1, 'INVALID_ICE_SERVERS');
+      ensure(!/^turns?:/i.test(server.urls), 'TURN_NOT_ALLOWED');
+      ensure(/^stun:(?:[A-Za-z0-9.-]+|\[[0-9a-fA-F:]+\])(?::\d{1,5})?$/.test(server.urls) && server.urls.length <= 256, 'INVALID_ICE_SERVERS');
+      const port = /\]:(\d+)$|^[^[]*:(\d+)$/.exec(server.urls.slice(5));
+      if (port) ensure(Number(port[1] || port[2]) >= 1 && Number(port[1] || port[2]) <= 65535, 'INVALID_ICE_SERVERS');
+      return { urls: server.urls };
+    });
+  }
+  function addressFamily(address) {
+    if (typeof address !== 'string') return 'unknown';
+    if (/\.local\.?$/i.test(address)) return 'mdns';
+    if (address.includes(':')) return 'v6';
+    if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(address)) return 'v4';
+    return 'unknown';
+  }
+  function safeCandidate(candidate) {
+    if (!candidate) return null;
+    return { candidateType: ['host', 'srflx', 'prflx', 'relay'].includes(candidate.candidateType) ? candidate.candidateType : 'unknown',
+      protocol: ['udp', 'tcp'].includes(candidate.protocol) ? candidate.protocol : 'unknown', addressFamily: addressFamily(candidate.address ?? candidate.ip) };
+  }
+  function safeIceUrl(value) {
+    if (typeof value !== 'string') return 'unknown';
+    const match = /^(stun|stuns|turn|turns):(?:\/\/)?(\[[^\]]+\]|[^:/?]+)(?::(\d+))?/i.exec(value);
+    if (!match) return 'redacted';
+    const family = addressFamily(match[2]);
+    const host = family === 'v4' || family === 'v6' ? '[address-redacted]' : /^[a-zA-Z0-9.-]+$/.test(match[2]) ? match[2] : '[redacted]';
+    return `${match[1].toLowerCase()}:${host}${match[3] ? ':' + match[3] : ''}`;
+  }
+  function increment(object, key) { object[key] = (object[key] || 0) + 1; }
+  async function updateStats() {
+    if (!pc || closed || statsBusy) return;
+    statsBusy = true;
+    try {
+      const stats = await pc.getStats();
+      if (closed) return;
+      const counts = { local: { count: 0, types: {}, protocols: {}, addressFamilies: {} }, remote: { count: 0, types: {}, protocols: {}, addressFamilies: {} } };
+      let pair = null, fallback = null;
+      stats.forEach(item => {
+        if (item.type === 'transport' && item.selectedCandidatePairId) pair = stats.get(item.selectedCandidatePairId) || pair;
+        if (item.type === 'candidate-pair' && item.nominated && item.state === 'succeeded') fallback = item;
+        if (item.type === 'local-candidate' || item.type === 'remote-candidate') {
+          const count = counts[item.type === 'local-candidate' ? 'local' : 'remote'];
+          const candidate = safeCandidate(item); count.count++; increment(count.types, candidate.candidateType); increment(count.protocols, candidate.protocol); increment(count.addressFamilies, candidate.addressFamily);
+        }
+      });
+      report.candidates = counts;
+      pair ||= fallback;
+      if (pair) report.selectedCandidatePair = {
+        state: ['frozen', 'waiting', 'in-progress', 'failed', 'succeeded'].includes(pair.state) ? pair.state : 'unknown', nominated: pair.nominated === true,
+        local: safeCandidate(stats.get(pair.localCandidateId)), remote: safeCandidate(stats.get(pair.remoteCandidateId)),
+        currentRoundTripTimeMs: Number.isFinite(pair.currentRoundTripTime) ? Math.round(pair.currentRoundTripTime * 100000) / 100 : null,
+        bytesSent: Number.isSafeInteger(pair.bytesSent) ? pair.bytesSent : null, bytesReceived: Number.isSafeInteger(pair.bytesReceived) ? pair.bytesReceived : null
+      };
+    } catch { warning('STATS_UNAVAILABLE'); }
+    finally { statsBusy = false; }
+    render();
+  }
+  function getReport() { return JSON.parse(JSON.stringify(report)); }
+  function render() {
+    const valid = report.counters.verifiedPongs >= 3;
+    const texts = { idle: '尚未开始', gathering: '正在收集连接候选…', 'awaiting-answer': '等待导入另一端的回答', 'awaiting-connection': '等待点对点连接…', verifying: '通道已打开，正在验证往返…', verified: '已验证连通', disconnected: '连接暂时中断', failed: '连接失败', closed: '测试已停止', expired: '测试已到期' };
+    $('status').textContent = texts[report.status] || '正在测试';
+    $('status-dot').className = 'dot' + (report.status === 'verified' ? ' ok' : ['failed', 'closed', 'expired'].includes(report.status) ? ' bad' : used ? ' busy' : '');
+    const visibleExpiry = report.expiresAt || previewExpiry;
+    $('expires').textContent = visibleExpiry ? new Date(visibleExpiry).toLocaleString('zh-CN', { hour12: false }) : '尚未设置';
+    $('verified').textContent = `${report.counters.verifiedPongs} / 10${valid ? ' · 已达标' : ''}`;
+    $('rtt').textContent = report.rttMs.mean === null ? '—' : `${report.rttMs.mean} ms`;
+    $('ice').textContent = report.iceConnectionState;
+    $('channel').textContent = report.dataChannelState;
+    const pair = report.selectedCandidatePair;
+    $('route').textContent = pair ? `${pair.local?.protocol || 'unknown'} / ${pair.local?.candidateType || '?'} → ${pair.remote?.candidateType || '?'}` : '尚未确定';
+    $('stop').disabled = !used || closed;
+    $('import-offer').disabled = used;
+    $('new-offer').disabled = used;
+    $('start-embedded').disabled = used;
+    $('import-answer').disabled = !used || closed || report.role !== 'offerer' || pc?.signalingState !== 'have-local-offer';
+    $('report').textContent = JSON.stringify(getReport(), null, 2);
+  }
+  function syncStates() {
+    if (!pc) return;
+    report.connectionState = safeState(pc.connectionState); report.iceConnectionState = safeState(pc.iceConnectionState);
+    report.iceGatheringState = safeState(pc.iceGatheringState); report.signalingState = safeState(pc.signalingState);
+    report.dataChannelState = channel ? safeState(channel.readyState) : 'none';
+    render();
+  }
+  function close(reason = 'user-stop') {
+    if (closed) return getReport();
+    closed = true; used = true;
+    clearTimeout(expireTimer); clearTimeout(trickleTimer); clearInterval(pingTimer); clearInterval(statsTimer); clearInterval(renderTimer);
+    cancelGather?.(); cancelGather = null;
+    report.endedAt = new Date().toISOString();
+    const known = ['user-stop', 'expired', 'page-unload', 'protocol-error', 'message-limit', 'channel-error', 'channel-closed', 'unexpected-channel', 'operation-failed'];
+    const code = known.includes(reason) ? reason : 'user-stop';
+    record(code); report.status = code === 'expired' ? 'expired' : (['protocol-error', 'channel-error', 'unexpected-channel', 'operation-failed'].includes(code) ? 'failed' : 'closed');
+    report.outcome = report.verifiedConnected ? 'verified-datachannel-roundtrips' : 'inconclusive';
+    try { channel?.close(); } catch {}
+    try { pc?.close(); } catch {}
+    challenges.clear(); receivedPings.clear(); metadata = null; localCandidateBuffer = []; trickleCallback = null;
+    // Keep output for manual export, but never include it in getReport().
+    syncStates(); render(); return getReport();
+  }
+  function sendFixed(type, seq, nonce) {
+    if (closed || channel?.readyState !== 'open' || !metadata) return false;
+    if (report.counters.sent + report.counters.received >= MAX_MESSAGES) { close('message-limit'); return false; }
+    if (channel.bufferedAmount > 16384) { warning('DATA_CHANNEL_BACKPRESSURE'); return false; }
+    const payload = JSON.stringify({ version: 1, type, sessionId: metadata.sessionId, secret: metadata.secret, seq, nonce });
+    if (encoder.encode(payload).byteLength > MAX_MESSAGE) { close('protocol-error'); return false; }
+    try { channel.send(payload); report.counters.sent++; return true; }
+    catch { close('channel-error'); return false; }
+  }
+  function ping() {
+    if (closed || nextSequence >= 10 || channel?.readyState !== 'open') { if (nextSequence >= 10 || closed) clearInterval(pingTimer); return; }
+    const sequence = nextSequence, nonce = randomHex();
+    challenges.set(sequence, { nonce, sentAt: performance.now() });
+    if (sendFixed('ping', sequence, nonce)) { nextSequence++; report.counters.pingsSent++; }
+    else challenges.delete(sequence);
+    render();
+  }
+  function invalidMessage() { report.counters.invalidMessages++; close('protocol-error'); }
+  function attachChannel(value) {
+    if (closed || channel || value.label !== 'p2p-probe' || value.protocol !== 'bridgedesk-p2p-probe-v1' || !value.ordered || value.maxRetransmits !== null || value.maxPacketLifeTime !== null) { value.close(); close('unexpected-channel'); return; }
+    channel = value; syncStates();
+    channel.onopen = () => {
+      if (closed) return;
+      report.status = 'verifying'; record('datachannel-open'); syncStates();
+      ping(); pingTimer = setInterval(ping, 500); updateStats();
+    };
+    channel.onclose = () => { if (!closed) close('channel-closed'); syncStates(); };
+    channel.onerror = () => { if (!closed) close('channel-error'); };
+    channel.onmessage = event => {
+      if (closed) return;
+      report.counters.received++;
+      if (report.counters.sent + report.counters.received > MAX_MESSAGES) { close('message-limit'); return; }
+      if (typeof event.data !== 'string' || encoder.encode(event.data).byteLength > MAX_MESSAGE) { invalidMessage(); return; }
+      let message;
+      try { message = JSON.parse(event.data); } catch { invalidMessage(); return; }
+      if (!plain(message) || Object.keys(message).length !== 6 || message.version !== 1 || !['ping','pong'].includes(message.type) || !metadata || message.sessionId !== metadata.sessionId || message.secret !== metadata.secret || !Number.isInteger(message.seq) || message.seq < 0 || message.seq > 9 || typeof message.nonce !== 'string' || !/^[a-f0-9]{32}$/.test(message.nonce)) { invalidMessage(); return; }
+      if (message.type === 'ping') {
+        if (receivedPings.has(message.seq)) {
+          if (receivedPings.get(message.seq) !== message.nonce) { invalidMessage(); return; }
+          report.counters.duplicateMessages++; render(); return;
+        }
+        receivedPings.set(message.seq, message.nonce); report.counters.pingsReceived++;
+        if (sendFixed('pong', message.seq, message.nonce)) report.counters.pongsSent++;
+      } else {
+        const challenge = challenges.get(message.seq);
+        if (!challenge || challenge.nonce !== message.nonce) { invalidMessage(); return; }
+        if (verified.has(message.seq)) { report.counters.duplicateMessages++; render(); return; }
+        verified.add(message.seq); report.counters.verifiedPongs++;
+        const rtt = Math.round(Math.max(0, performance.now() - challenge.sentAt) * 100) / 100;
+        report.rttMs.samples.push(rtt); report.rttMs.min = Math.min(...report.rttMs.samples); report.rttMs.max = Math.max(...report.rttMs.samples);
+        report.rttMs.mean = Math.round(report.rttMs.samples.reduce((sum, n) => sum + n, 0) / report.rttMs.samples.length * 100) / 100;
+        if (report.counters.verifiedPongs >= 3) { report.verifiedConnected = true; report.status = 'verified'; report.outcome = 'verified-datachannel-roundtrips'; if (report.counters.verifiedPongs === 3) record('three-roundtrips-verified'); }
+      }
+      render();
+    };
+  }
+  function begin(meta, role, iceServers, onSignal = null) {
+    ensure(!used, 'PAGE_ALREADY_USED');
+    ensure(typeof RTCPeerConnection === 'function' && typeof crypto?.getRandomValues === 'function', 'WEBRTC_UNAVAILABLE');
+    const ice = checkIce(iceServers);
+    ensure(onSignal === null || typeof onSignal === 'function', 'INVALID_ENVELOPE');
+    trickleCallback = onSignal;
+    used = true; metadata = meta; report.role = role; report.sessionId = meta.sessionId; report.expiresAt = meta.expiresAt;
+    report.startedAt = new Date().toISOString(); report.status = 'gathering'; report.outcome = 'pending'; report.thirdPartyStun = ice.length > 0;
+    if (ice.length === 0) warning('NO_STUN_CONFIGURED');
+    try { pc = new RTCPeerConnection({ iceServers: ice, iceTransportPolicy: 'all', bundlePolicy: 'max-bundle', iceCandidatePoolSize: 0 }); }
+    catch { close('operation-failed'); throw operationError('ICE_OPERATION_FAILED'); }
+    pc.onicecandidateerror = event => {
+      if (report.iceErrors.length >= 20 || closed) return;
+      report.iceErrors.push({ code: Number.isInteger(event.errorCode) ? event.errorCode : null, url: safeIceUrl(event.url) }); render();
+    };
+    const gatherStartedAt = performance.now();
+    pc.onicegatheringstatechange = () => {
+      syncStates();
+      if (trickleCallback && pc.iceGatheringState === 'complete') {
+        clearTimeout(trickleTimer);
+        report.gathering = { complete: true, partial: false, elapsedMs: Math.round(performance.now() - gatherStartedAt) };
+        updateStats().then(() => { if (!(report.candidates.local.types.srflx > 0)) warning('NO_SERVER_REFLEXIVE_CANDIDATES_FAILURE_WOULD_BE_INCONCLUSIVE'); render(); }).catch(() => {});
+      }
+    };
+    if (onSignal) {
+      report.signalingMode = 'automatic-trickle';
+      pc.onicecandidate = event => {
+        if (closed) return;
+        const candidate = event.candidate ? event.candidate.toJSON() : null;
+        if (!localSignalsReady) {
+          if (localCandidateBuffer.length >= 64) { warning('LOCAL_CANDIDATE_LIMIT'); close('operation-failed'); return; }
+          localCandidateBuffer.push(candidate);
+        } else queueCandidateSignal(candidate);
+      };
+      trickleTimer = setTimeout(() => {
+        if (closed || pc.iceGatheringState === 'complete') return;
+        report.gathering = { complete: false, partial: true, elapsedMs: Math.round(performance.now() - gatherStartedAt) };
+        warning('ICE_GATHERING_CONTINUES_AFTER_15_SECONDS'); render();
+      }, 15000);
+    }
+    pc.onsignalingstatechange = syncStates;
+    pc.oniceconnectionstatechange = () => { record('ice-' + safeState(pc.iceConnectionState)); syncStates(); };
+    pc.onconnectionstatechange = () => {
+      if (closed) return;
+      record('connection-' + safeState(pc.connectionState));
+      if (report.connectionStateChanges.length < 40) report.connectionStateChanges.push({ at: new Date().toISOString(), state: safeState(pc.connectionState) });
+      if (pc.connectionState === 'failed') { report.status = 'failed'; if (!report.verifiedConnected) {
+        report.outcome = 'inconclusive';
+        warning(onSignal ? 'AUTO_ICE_FAILED_CAUSE_UNDETERMINED' : 'MANUAL_SIGNALING_DELAY_MAY_HAVE_EXHAUSTED_ICE_CHECKS');
+        $('progress').textContent = onSignal ? '自动交换连接信息后，当前 ICE 检查未建立可验证的数据通道。具体原因尚未确定，请保留两端报告；不要据此断言所有直连路径都不可用。' : '连接尚未验证。手动传回答案可能晚于 ICE 检查窗口；请立即交回 answer。若导入后仍不恢复，需要重新加载两端并生成新 offer，不能把本次超时直接视为网络不可直连。';
+      } }
+      else if (pc.connectionState === 'disconnected') report.status = 'disconnected';
+      else if (pc.connectionState === 'connected') report.status = report.counters.verifiedPongs >= 3 ? 'verified' : 'verifying';
+      syncStates(); updateStats();
+    };
+    pc.ondatachannel = event => attachChannel(event.channel);
+    expireTimer = setTimeout(() => close('expired'), Math.min(MAX_DURATION, Math.max(1, Date.parse(meta.expiresAt) - Date.now())));
+    statsTimer = setInterval(updateStats, 1000); renderTimer = setInterval(render, 1000);
+    record('test-started'); render();
+  }
+  async function gather() {
+    const started = performance.now();
+    if (pc.iceGatheringState !== 'complete') {
+      await new Promise((resolve, reject) => {
+        let done = false;
+        const cleanup = () => { clearTimeout(timer); pc.removeEventListener('icegatheringstatechange', changed); cancelGather = null; };
+        const finish = () => { if (done) return; done = true; cleanup(); resolve(); };
+        const changed = () => { if (pc.iceGatheringState === 'complete') finish(); };
+        const timer = setTimeout(finish, 15000);
+        cancelGather = () => { if (done) return; done = true; cleanup(); reject(operationError('CLOSED')); };
+        pc.addEventListener('icegatheringstatechange', changed); changed();
+      });
+    }
+    ensure(!closed && Date.parse(report.expiresAt) > Date.now(), 'CLOSED');
+    report.gathering = { complete: pc.iceGatheringState === 'complete', partial: pc.iceGatheringState !== 'complete', elapsedMs: Math.round(performance.now() - started) };
+    if (report.gathering.partial) warning('ICE_GATHERING_PARTIAL_AFTER_15_SECONDS');
+    await updateStats();
+    if (!(report.candidates.local.types.srflx > 0)) warning('NO_SERVER_REFLEXIVE_CANDIDATES_FAILURE_WOULD_BE_INCONCLUSIVE');
+  }
+  function envelope(kind) {
+    ensure(!closed && metadata, 'CLOSED');
+    const result = checkEnvelope({ version: 1, kind, ...metadata, description: { type: pc.localDescription.type, sdp: pc.localDescription.sdp } }, kind);
+    output = result; $('outgoing').value = JSON.stringify(result, null, 2);
+    $('download-answer').disabled = kind !== 'answer'; $('download-offer').disabled = kind !== 'offer';
+    $('output-help').textContent = kind === 'answer' ? '回答已生成。请立即下载 Windows-P2P-answer.json 交回发起端，并保持本页面打开；等待过久可能需要两端重新生成测试。' : '邀请已生成。把 P2P-offer.json 交给另一台电脑；收到 answer 后立即导入此页面。';
+    $('progress').textContent = report.gathering.partial ? '候选收集达到 15 秒上限，本次信令只包含已收集到的候选；结果可能不完整。请立即交换信令并保持两端页面打开。' : '候选收集完成。请立即交换信令并等待至少 3 次已验证往返。发起端导入 answer 前的超时不能证明网络不可直连。';
+    render(); return JSON.parse(JSON.stringify(result));
+  }
+  async function createOffer(options) {
+    ensure(!used, 'PAGE_ALREADY_USED');
+    const meta = checkMetadata(options);
+    begin(meta, 'offerer', options.iceServers === undefined ? DEFAULT_ICE : options.iceServers);
+    try {
+      attachChannel(pc.createDataChannel('p2p-probe', { ordered: true, protocol: 'bridgedesk-p2p-probe-v1' }));
+      await pc.setLocalDescription(await pc.createOffer()); await gather();
+      report.status = 'awaiting-answer'; return envelope('offer');
+    } catch (error) { close('operation-failed'); throw operationError(publicError(error)); }
+  }
+  async function acceptOffer(value, options = {}) {
+    ensure(!used, 'PAGE_ALREADY_USED');
+    const offer = checkEnvelope(value, 'offer');
+    ensure(plain(options), 'INVALID_ICE_SERVERS');
+    begin(checkMetadata(offer), 'answerer', options.iceServers === undefined ? DEFAULT_ICE : options.iceServers);
+    try {
+      await pc.setRemoteDescription(offer.description); report.remoteDescriptionAppliedAt = new Date().toISOString();
+      await pc.setLocalDescription(await pc.createAnswer()); report.answerCreatedAt = new Date().toISOString(); await gather();
+      if (report.counters.verifiedPongs < 3) report.status = 'awaiting-connection';
+      return envelope('answer');
+    } catch (error) { close('operation-failed'); throw operationError(publicError(error)); }
+  }
+  async function acceptAnswer(value) {
+    ensure(used && !closed && report.role === 'offerer' && pc?.signalingState === 'have-local-offer', 'NO_ACTIVE_OFFER');
+    const answer = checkEnvelope(value, 'answer');
+    ensure(metadata && answer.sessionId === metadata.sessionId && answer.expiresAt === metadata.expiresAt && answer.secret === metadata.secret, 'METADATA_MISMATCH');
+    try { await pc.setRemoteDescription(answer.description); report.remoteDescriptionAppliedAt = new Date().toISOString(); report.status = 'awaiting-connection'; record('answer-imported'); syncStates(); }
+    catch { close('operation-failed'); throw operationError('ICE_OPERATION_FAILED'); }
+  }
+  function queueCandidateSignal(candidate) {
+    trickleSendChain = trickleSendChain.then(async () => {
+      if (!closed && trickleCallback) await trickleCallback({ type: 'candidate', payload: candidate });
+    }).catch(() => { warning('SIGNAL_CALLBACK_FAILED'); close('operation-failed'); });
+  }
+  async function publishDescription(kind) {
+    ensure(!closed && metadata && trickleCallback, 'CLOSED');
+    const result = checkEnvelope({ version: 1, kind, ...metadata, description: { type: pc.localDescription.type, sdp: pc.localDescription.sdp } }, kind);
+    await trickleCallback({ type: kind, payload: result });
+    ensure(!closed, 'CLOSED');
+    localSignalsReady = true;
+    for (const candidate of localCandidateBuffer.splice(0)) queueCandidateSignal(candidate);
+    return result;
+  }
+  async function createOfferTrickle(options, onSignal) {
+    ensure(!used, 'PAGE_ALREADY_USED');
+    const meta = checkMetadata(options);
+    ensure(typeof onSignal === 'function', 'INVALID_ENVELOPE');
+    begin(meta, 'offerer', options.iceServers === undefined ? DEFAULT_ICE : options.iceServers, onSignal);
+    try {
+      attachChannel(pc.createDataChannel('p2p-probe', { ordered: true, protocol: 'bridgedesk-p2p-probe-v1' }));
+      await pc.setLocalDescription(await pc.createOffer());
+      report.status = 'awaiting-answer'; render();
+      return await publishDescription('offer');
+    } catch (error) { close('operation-failed'); throw operationError(publicError(error)); }
+  }
+  async function acceptOfferTrickle(value, options = {}) {
+    ensure(!used, 'PAGE_ALREADY_USED');
+    const offer = checkEnvelope(value, 'offer');
+    ensure(plain(options) && typeof options.onSignal === 'function', 'INVALID_ENVELOPE');
+    begin(checkMetadata(offer), 'answerer', options.iceServers === undefined ? DEFAULT_ICE : options.iceServers, options.onSignal);
+    try {
+      await pc.setRemoteDescription(offer.description); report.remoteDescriptionAppliedAt = new Date().toISOString();
+      await pc.setLocalDescription(await pc.createAnswer()); report.answerCreatedAt = new Date().toISOString();
+      report.status = 'awaiting-connection'; render();
+      return await publishDescription('answer');
+    } catch (error) { close('operation-failed'); throw operationError(publicError(error)); }
+  }
+  async function addRemoteCandidate(value) {
+    ensure(!closed && pc && pc.remoteDescription, 'NO_REMOTE_DESCRIPTION');
+    ensure(remoteCandidateCount < 64, 'CANDIDATE_LIMIT');
+    let candidate = null;
+    if (value !== null) {
+      let size = Infinity;
+      try { size = encoder.encode(JSON.stringify(value)).byteLength; } catch {}
+      ensure(plain(value) && size <= 4096 && Object.keys(value).every(key => ['candidate', 'sdpMid', 'sdpMLineIndex', 'usernameFragment'].includes(key)), 'INVALID_CANDIDATE');
+      ensure(typeof value.candidate === 'string' && value.candidate.length <= 4000 && !/[\r\n\x00-\x1f\x7f]/.test(value.candidate), 'INVALID_CANDIDATE');
+      ensure(value.candidate === '' || /^candidate:[^\s]+\s+\d+\s+(?:udp|tcp)\s+\d+\s+[^\s]+\s+\d+\s+typ\s+(?:host|srflx|prflx)(?:\s|$)/i.test(value.candidate), 'INVALID_CANDIDATE');
+      ensure(value.sdpMid == null || (typeof value.sdpMid === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(value.sdpMid)), 'INVALID_CANDIDATE');
+      ensure(value.sdpMLineIndex == null || value.sdpMLineIndex === 0, 'INVALID_CANDIDATE');
+      ensure(value.usernameFragment == null || (typeof value.usernameFragment === 'string' && /^[A-Za-z0-9+/]{1,256}$/.test(value.usernameFragment)), 'INVALID_CANDIDATE');
+      candidate = { candidate: value.candidate, sdpMid: value.sdpMid ?? null, sdpMLineIndex: value.sdpMLineIndex ?? null };
+      if (value.usernameFragment != null) candidate.usernameFragment = value.usernameFragment;
+    }
+    remoteCandidateCount++;
+    try { await pc.addIceCandidate(candidate); }
+    catch { warning('REMOTE_CANDIDATE_REJECTED'); throw operationError('INVALID_CANDIDATE'); }
+  }
+  function download(value, filename) {
+    const blob = new Blob([JSON.stringify(value, null, 2) + '\n'], { type: 'application/json' });
+    const url = URL.createObjectURL(blob), anchor = document.createElement('a');
+    anchor.href = url; anchor.download = filename; document.body.append(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  async function action(work) { $('error').hidden = true; try { await work(); } catch (error) { showError(error); } }
+  $('start-embedded').addEventListener('click', () => action(() => acceptOffer(EMBEDDED_OFFER)));
+  $('import-offer').addEventListener('click', () => action(() => acceptOffer($('incoming').value)));
+  $('import-answer').addEventListener('click', () => action(() => acceptAnswer($('incoming').value)));
+  $('new-offer').addEventListener('click', () => action(() => createOffer({ sessionId: randomHex(), secret: randomHex(32), expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString() })));
+  $('stop').addEventListener('click', () => close('user-stop'));
+  $('download-report').addEventListener('click', () => download(getReport(), report.role === 'answerer' ? 'Windows-P2P-report.json' : 'P2P-diagnostic-report.json'));
+  $('download-answer').addEventListener('click', () => { if (output?.kind === 'answer') download(output, 'Windows-P2P-answer.json'); });
+  $('download-offer').addEventListener('click', () => { if (output?.kind === 'offer') download(output, 'P2P-offer.json'); });
+  $('import-file').addEventListener('change', () => action(async () => {
+    const file = $('import-file').files?.[0]; if (!file) return;
+    ensure(file.size <= MAX_ENVELOPE, 'ENVELOPE_TOO_LARGE');
+    const text = await file.text(); parseJSON(text); $('incoming').value = text;
+    $('progress').textContent = '文件内容已载入。请点击相应按钮导入 offer 或 answer；尚未开始新的网络操作。';
+  }));
+  window.addEventListener('pagehide', () => close('page-unload'));
+  if (EMBEDDED_OFFER !== null) {
+    try {
+      const checked = checkEnvelope(EMBEDDED_OFFER, 'offer');
+      previewExpiry = checked.expiresAt;
+      $('start-embedded').hidden = false; $('new-offer').hidden = true;
+      $('incoming').value = JSON.stringify(checked, null, 2);
+      $('expires').textContent = new Date(checked.expiresAt).toLocaleString('zh-CN', { hour12: false });
+      $('progress').textContent = '本文件已包含测试邀请。点击“开始测试并生成 Windows 回答”后才会联网，请保持页面打开。';
+    } catch (error) { showError(error); }
+  }
+  window.p2pProbe = Object.freeze({ createOffer, acceptOffer, acceptAnswer, createOfferTrickle, acceptOfferTrickle, addRemoteCandidate, getReport, close });
+  render();
+})();
+</script>
+</body>
+</html>

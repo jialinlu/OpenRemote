@@ -1,0 +1,57 @@
+name: Build desktop packages
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS-arm64
+            os: macos-15
+            arch: arm64
+            flags: --mac --arm64
+          - name: Windows-x64
+            os: windows-2022
+            arch: x64
+            flags: --win --x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          architecture: ${{ matrix.arch }}
+          cache: npm
+      - run: npm ci
+      - name: Download and verify pinned connection helper
+        run: node scripts/prepare-tunnel.mjs
+      - name: Build native helper (macOS)
+        if: runner.os == 'macOS'
+        run: npm run build:native
+      - name: Build native helper (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: 'call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" && npm run build:native'
+      - run: npm test
+      - run: npm run pack -- ${{ matrix.flags }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: |
+            dist/openremote/*.dmg
+            dist/openremote/*.zip
+            dist/openremote/*.exe
+          if-no-files-found: error
+          retention-days: 14

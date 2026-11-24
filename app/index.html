@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title id="page-title">设备与连接 · OpenRemote</title>
+  <link rel="stylesheet" href="fluent.css">
+  <link rel="stylesheet" href="console.css">
+</head>
+<body class="control-console">
+  <aside class="sidebar">
+    <div class="brand"><img src="icon.svg" alt="">OpenRemote</div>
+    <nav aria-label="主导航">
+      <button class="nav active" data-page="devices" aria-current="page"><span class="nav-glyph" aria-hidden="true"></span>设备</button>
+      <button class="nav" data-page="session"><span class="nav-glyph" aria-hidden="true"></span>会话<i id="session-dot" hidden></i></button>
+      <button class="nav" data-page="settings"><span class="nav-glyph" aria-hidden="true"></span>设置</button>
+    </nav>
+    <div class="sidebar-bottom">
+      <div><span class="connection-dot" id="relay-dot"></span><span id="relay-label">正在读取连接状态…</span></div>
+      <div class="version"><span id="version">—</span></div>
+    </div>
+  </aside>
+  <main>
+
+    <section class="page" id="page-devices">
+      <div class="page-heading heading-row">
+        <div><h1 tabindex="-1">设备与连接</h1><p id="device-intro">选择这台电脑要做的事。</p></div>
+        <button class="secondary add-button" id="show-setup" aria-controls="setup-panel" aria-expanded="false" hidden>添加设备</button>
+      </div>
+      <div class="active-session" id="active-session" hidden>
+        <span class="live-dot" aria-hidden="true"></span><strong id="active-label"></strong><span class="security-badge" id="connection-security" hidden>端到端加密</span>
+        <div class="button-row"><button class="secondary compact" id="active-open">查看会话</button><button class="danger compact" id="active-disconnect">立即断开</button></div>
+      </div>
+      <div id="pending-list"></div>
+      <div id="outgoing-list"></div>
+      <section id="devices-list-section" aria-labelledby="devices-label" hidden>
+        <div class="section-heading"><h2 id="devices-label" tabindex="-1">已配对设备 <span id="peer-count">0</span></h2></div>
+        <div class="device-service-notice" id="device-service-notice" hidden>
+          <div role="status"><strong id="device-service-title"></strong><p id="device-service-hint"></p></div>
+          <button class="secondary compact" id="device-service-action" type="button"></button>
+        </div>
+        <p class="inline-message" id="device-service-feedback" role="status" hidden></p>
+        <div class="device-list" id="peer-list"></div>
+      </section>
+      <section class="card setup-panel" id="setup-panel" aria-labelledby="setup-title">
+        <h2 id="setup-title">添加设备</h2>
+        <div class="role-picker" aria-label="选择本机用途" role="group">
+          <button id="add-device" type="button" aria-pressed="true" aria-controls="viewer-setup">控制另一台电脑</button>
+          <button id="host-role" type="button" aria-pressed="false" aria-controls="host-setup">让另一台电脑连接本机</button>
+        </div>
+        <div id="viewer-setup" class="setup-path">
+          <ol class="setup-steps">
+            <li><div><strong>在对方电脑上准备连接文件和配对码</strong><p>请对方打开「让另一台电脑连接本机」，把导出的文件和当前配对码交给你。</p></div></li>
+            <li><div><strong>在本机导入文件并输入配对码</strong><p>对方确认请求后，就能从设备列表连接。</p></div><button class="primary" id="join-invitation">导入连接文件</button></li>
+          </ol>
+          <p class="inline-message" id="import-feedback" role="status" hidden></p>
+        </div>
+        <div id="host-setup" class="setup-path" hidden>
+          <ol class="setup-steps">
+            <li><div><strong id="quick-title">启动连接服务</strong><p id="quick-message">两台电脑需要接入同一个服务。</p></div><div class="button-row"><button class="primary" id="start-quick">启动连接服务</button><button class="secondary" id="stop-quick" hidden>停止服务</button></div></li>
+            <li><div><strong>把连接文件交给对方</strong><p id="export-hint">服务就绪后，在本机导出 .openremote 文件。</p></div><button class="secondary" id="copy-invitation" disabled>导出连接文件</button></li>
+            <li>
+              <div>
+                <strong>把临时配对码告诉对方</strong>
+                <div class="button-row" id="pair-code-actions" hidden>
+                  <code id="pair-code"></code>
+                  <button type="button" class="text-button" id="copy-pair-code">复制配对码</button>
+                </div>
+                <p id="pair-state">服务就绪后可生成配对码。</p>
+              </div>
+              <button class="secondary" id="pair-mode" disabled>生成配对码</button>
+            </li>
+            <li><div><strong>允许已配对设备访问本机</strong><p id="share-ready">打开本机的「允许远程访问」，并检查屏幕和键鼠权限。</p></div><button class="secondary" id="review-access">查看本机访问</button></li>
+          </ol>
+          <p class="inline-message" id="service-feedback" role="status" hidden></p>
+        </div>
+      </section>
+      <section class="local-section" aria-labelledby="local-title">
+        <div class="section-heading"><h2 id="local-title">本机访问</h2></div>
+        <article class="card local-summary" aria-labelledby="local-name">
+        <div class="local-heading">
+          <div class="local-identity"><span class="computer-symbol local-symbol" aria-hidden="true"></span><div><h3 id="local-name">正在读取…</h3><p id="host-caption">开启后，已获授权的设备可以连接本机。</p></div></div>
+          <label class="host-toggle" for="host-enabled"><span>允许远程访问</span><span class="switch"><input type="checkbox" id="host-enabled"><span></span></span></label>
+        </div>
+        <div class="permission-row"><span id="screen-permission">屏幕：待检查</span><span id="input-permission">键鼠：待检查</span><button class="text-button" id="check-permissions">刷新权限</button><button class="text-button mac-permission" id="screen-settings" hidden>屏幕授权</button><button class="text-button mac-permission" id="input-settings" hidden>键鼠授权</button></div>
+        <p id="permission-feedback" class="inline-message" role="status" hidden></p>
+        <div class="local-footer"><details><summary>本机详情</summary><p><span id="local-platform"></span> · 设备编号 <code id="self-id"></code>（用于识别设备）</p></details><span id="emergency-note">紧急断开 <kbd id="emergency-key"></kbd></span></div>
+        </article>
+      </section>
+    </section>
+    <section class="page" id="page-session" hidden>
+      <div class="page-heading"><h1 tabindex="-1">远程会话</h1><p>查看连接状态，或回到远程桌面。</p></div>
+      <article class="card session-summary">
+        <span class="session-symbol" aria-hidden="true"></span>
+        <h2 id="session-title">没有进行中的会话</h2><p id="session-status">前往设备列表选择一台电脑。</p>
+        <div class="button-row"><button id="show-session" class="primary" hidden>打开远程窗口</button><button class="danger" id="disconnect" hidden>断开连接</button><button id="session-retry" class="primary" hidden>重新连接</button><button id="session-devices" class="secondary">查看设备</button></div>
+      </article>
+    </section>
+    <section class="page settings-page" id="page-settings" hidden>
+      <div class="page-heading"><h1>设置</h1><p>管理设备、画面质量与连接服务。</p></div>
+      <form id="settings-form">
+        <article class="card settings-card">
+          <div class="settings-section-title"><h2>设备与画面</h2><p>选择共享显示器及画面质量。</p></div>
+          <div class="form-grid">
+            <label>设备名称<input id="setting-name" maxlength="80" required autocomplete="off"></label>
+            <label>被控显示器<select id="setting-display" aria-describedby="display-feedback"><option value="">主显示器</option></select><small id="display-feedback" class="field-help" role="status" hidden></small></label>
+            <label>画面质量<select id="setting-quality"><option value="balanced">均衡 · 1080p / 30fps / 6 Mbps</option><option value="sharp">清晰 · 最高 4K / 30fps / 16 Mbps</option><option value="smooth">流畅 · 1080p / 60fps / 10 Mbps</option></select></label>
+          </div>
+          <p class="field-help">分辨率和帧率为目标上限，实际表现取决于显示器、编码器与网络。</p>
+          <div class="login-choice"><label class="checkbox-label"><input type="checkbox" id="setting-autolaunch">登录系统后启动（打包版生效）</label></div>
+        </article>
+        <details class="network-details card">
+          <summary>高级网络设置 · 自建服务与 TURN</summary>
+          <section class="network-group">
+            <div class="settings-section-title"><h2>协调服务</h2><p>临时服务地址自动填写，也可使用自己的 WSS 服务。</p></div>
+            <label>服务地址<input id="setting-relay" type="text" placeholder="wss://signal.example.com" autocomplete="off" spellcheck="false"></label>
+            <p class="field-help">公网使用 WSS。开发测试仅允许 ws://127.0.0.1:8787 或 localhost。</p>
+          </section>
+          <section class="network-group">
+            <div class="settings-section-title"><h2>穿透与中继</h2><p>优先尝试直连，无法直连时通过 TURN 转发加密流量。</p></div>
+            <div class="form-grid">
+              <label>STUN 地址（可选）<input id="setting-stun" placeholder="stun:turn.example.com:3478" spellcheck="false"></label>
+              <label>TURN 地址（每行一条，可选）<textarea id="setting-turn" rows="2" placeholder="turn:turn.example.com:3478?transport=udp" spellcheck="false"></textarea></label>
+              <label>TURN 用户名<input id="setting-turn-user" autocomplete="off"></label>
+              <label>TURN 密码<input id="setting-turn-password" type="password" autocomplete="new-password" placeholder="至少 16 个字符"></label>
+            </div>
+            <label class="checkbox-label relay-choice"><input type="checkbox" id="setting-relay-only">仅使用 TURN 中继（用于检测中继是否正常）</label>
+            <p class="field-help">默认使用 Google STUN。TURN 需自行配置，其用户名与密码将保存在本机系统加密存储中。</p>
+          </section>
+        </details>
+        <p class="field-help tray-help">关闭主窗口后，软件会继续在菜单栏或托盘运行。退出软件、锁屏、合盖或关机将停止远程访问。</p>
+        <div class="settings-footer"><span id="settings-hint">设置会保存在这台电脑上。</span><button class="primary" id="save-settings" type="submit">保存设置</button></div>
+      </form>
+    </section>
+
+  </main>
+  <dialog id="pair-dialog" aria-labelledby="pair-title">
+    <form id="pair-form">
+      <div class="dialog-head"><h2 id="pair-title">配对设备</h2><button class="icon-button" type="button" id="close-pair" aria-label="关闭">×</button></div>
+      <p id="pair-instructions">确认对方设备，再输入它当前显示的配对码。</p>
+      <div class="imported-device" id="imported-name"></div>
+      <label id="pair-input-label">对方的 8 位配对码<input id="pair-input" class="code-input" inputmode="numeric" pattern="(?:\s*[0-9]){8}\s*" title="请输入 8 位数字，可以包含空格" autocomplete="off" placeholder="输入或粘贴 8 位数字" required aria-describedby="pair-help pair-feedback"></label>
+      <p class="field-help" id="pair-help">配对码五分钟内有效。</p><p id="pair-feedback" class="inline-message" role="status" hidden></p>
+      <button id="pair-submit" class="primary" type="submit">发送配对请求</button>
+    </form>
+  </dialog>
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+  <script src="renderer.js"></script>
+</body>
+</html>

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>远程桌面 · OpenRemote</title>
+  <link rel="stylesheet" href="fluent.css">
+  <link rel="stylesheet" href="session.css">
+</head>
+<body class="remote-shell">
+  <header class="remote-toolbar" role="group" aria-label="会话工具栏">
+    <div class="remote-brand">
+      <span class="device-mark" aria-hidden="true"></span>
+      <div class="remote-identity">
+        <div class="remote-title">
+          <h1 id="session-title">远程桌面</h1>
+          <span id="session-role" data-mode="pending" role="status">连接中</span>
+        </div>
+        <p id="session-status">正在建立加密连接…</p>
+      </div>
+    </div>
+    <div class="remote-actions">
+      <label class="control-switch">
+        <input type="checkbox" id="control-enabled" aria-describedby="keyboard-hint" checked disabled>
+        <span>键鼠控制</span>
+      </label>
+      <button id="fullscreen" type="button" aria-pressed="false" disabled>全屏</button>
+      <button class="disconnect-remote" id="disconnect" type="button">断开</button>
+    </div>
+  </header>
+  <div class="viewport" id="viewport" tabindex="0" aria-label="远程桌面" aria-describedby="keyboard-hint">
+    <video id="remote-video" autoplay playsinline muted></video>
+    <textarea id="keyboard-input" class="keyboard-input" aria-label="远程键盘输入" aria-describedby="keyboard-hint" autocomplete="off" autocapitalize="off" spellcheck="false" rows="1" disabled></textarea>
+    <div class="video-placeholder" id="video-placeholder">
+      <div class="connection-spinner" aria-hidden="true"></div>
+      <h2 id="placeholder-title">正在进入远程桌面</h2>
+      <p id="placeholder-message">正在等待远端画面。</p>
+    </div>
+    <div id="host-banner" hidden>正在共享本机桌面</div>
+  </div>
+  <footer class="session-footer">
+    <details id="connection-details">
+      <summary>连接详情</summary>
+      <dl class="session-metrics">
+        <div><dt>分辨率</dt><dd id="stat-resolution">—</dd></div>
+        <div><dt>帧率</dt><dd id="stat-fps">—</dd></div>
+        <div><dt id="bitrate-label">接收码率</dt><dd id="stat-bitrate">—</dd></div>
+        <div><dt>网络往返</dt><dd id="stat-rtt">—</dd></div>
+        <div><dt>连接路径</dt><dd id="stat-route">—</dd></div>
+      </dl>
+    </details>
+    <p id="keyboard-hint"><span class="key-combo"><kbd>Shift</kbd> + <kbd>Esc</kbd></span><span>释放键鼠并返回工具栏</span></p>
+  </footer>
+  <div id="toast" role="status" hidden></div>
+  <script src="session.js"></script>
+</body>
+</html>

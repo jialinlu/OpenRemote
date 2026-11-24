@@ -1,0 +1,23 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import { randomUUID } from 'node:crypto';
+const require = createRequire(import.meta.url);
+const { SessionPolicy } = require('../shared/session-policy.cjs');
+test('renderer watchdog rejects stale heartbeats and detects a frozen established session', () => {
+  const gate = new SessionPolicy();
+  const id = randomUUID();
+  const active = gate.begin({ peer: { id: 'a'.repeat(64), name: 'test', allowControl: true }, sessionId: id, role: 'host', hostEnabled: true });
+  assert.equal(gate.isStalled(active.lastAlive + 13000), false);
+  active.connected = true;
+  assert.equal(gate.isStalled(active.lastAlive + 12000), false);
+  assert.equal(gate.isStalled(active.lastAlive + 12001), true);
+  active.lastAlive = 1;
+  gate.heartbeat(randomUUID());
+  assert.equal(active.lastAlive, 1);
+  gate.heartbeat(id);
+  assert.ok(active.lastAlive > 1);
+  assert.equal(gate.isStalled(), false);
+  gate.end();
+  assert.equal(gate.isStalled(), false);
+});

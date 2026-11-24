@@ -1,0 +1,129 @@
+{
+  "name": "bridgedesk",
+  "version": "0.3.3",
+  "private": true,
+  "description": "OpenRemote secure remote desktop",
+  "author": "OpenRemote contributors",
+  "license": "Apache-2.0",
+  "main": "app/main.cjs",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "setup:electron": "install-electron",
+    "prestart": "install-electron",
+    "start": "electron .",
+    "predev": "install-electron",
+    "dev": "electron .",
+    "server": "node server/index.cjs",
+    "build:native": "node scripts/build-native.mjs",
+    "test": "node --test test/*.test.mjs",
+    "check": "node scripts/check.mjs",
+    "test:renderer": "node scripts/smoke-renderer.mjs",
+    "test:desktop": "node scripts/smoke-desktop.mjs",
+    "pack": "electron-builder --publish never",
+    "pack:dir": "electron-builder --dir --publish never",
+    "test:live": "node scripts/smoke-live-desktop.mjs"
+  },
+  "dependencies": {
+    "https-proxy-agent": "7.0.6",
+    "ws": "8.22.1"
+  },
+  "devDependencies": {
+    "electron": "45.2.3",
+    "electron-builder": "26.18.0"
+  },
+  "overrides": {
+    "minimatch@>=7.0.0 <11.0.1": "11.0.5"
+  },
+  "build": {
+    "appId": "local.bridgedesk.desktop",
+    "productName": "OpenRemote",
+    "icon": "app/icon.png",
+    "asar": true,
+    "directories": {
+      "output": "dist/openremote"
+    },
+    "files": [
+      "app/**/*",
+      "shared/**/*",
+      "server/**/*",
+      "!**/._*",
+      "package.json",
+      "LICENSE",
+      "NOTICE",
+      "docs/THIRD-PARTY.md"
+    ],
+    "extraResources": [
+      {
+        "from": "native/bin",
+        "to": "native",
+        "filter": [
+          "input-helper",
+          "input-helper.exe",
+          "LICENSE*"
+        ]
+      }
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.productivity",
+      "identity": "-",
+      "extendInfo": {
+        "NSScreenCaptureUsageDescription": "OpenRemote shares your screen only with devices you explicitly pair and authorize.",
+        "NSAccessibilityUsageDescription": "OpenRemote uses Accessibility to apply keyboard and mouse input from your authorized devices."
+      },
+      "extraResources": [
+        {
+          "from": "vendor/darwin-arm64",
+          "to": "tunnel",
+          "filter": [
+            "cloudflared",
+            "LICENSE",
+            "provenance.json"
+          ]
+        }
+      ],
+      "sign": "scripts/sign-macos.cjs"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "requestedExecutionLevel": "asInvoker",
+      "extraResources": [
+        {
+          "from": "vendor/win32-x64",
+          "to": "tunnel",
+          "filter": [
+            "cloudflared.exe",
+            "LICENSE",
+            "provenance.json"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

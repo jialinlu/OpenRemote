@@ -1,0 +1,56 @@
+name: personal-remote
+services:
+  relay:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8787"
+    expose:
+      - "8787"
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    init: true
+
+  caddy:
+    image: caddy:2.11.9-alpine
+    environment:
+      SIGNAL_DOMAIN: ${SIGNAL_DOMAIN:?Set SIGNAL_DOMAIN in deploy/.env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [relay]
+    restart: unless-stopped
+
+  # Optional, on a Linux VPS. Host networking avoids UDP port-range translation.
+  turn:
+    profiles: [turn]
+    image: coturn/coturn:4.18.0-r0
+    network_mode: host
+    entrypoint: ["/bin/sh", "/opt/start-turn.sh"]
+    environment:
+      TURN_DOMAIN: ${TURN_DOMAIN:-}
+      TURN_EXTERNAL_IP: ${TURN_EXTERNAL_IP:-}
+      TURN_RELAY_IP: ${TURN_RELAY_IP:-}
+      TURN_USERNAME: ${TURN_USERNAME:-}
+      TURN_PASSWORD: ${TURN_PASSWORD:-}
+      TURN_TLS: ${TURN_TLS:-0}
+    volumes:
+      - ./start-turn.sh:/opt/start-turn.sh:ro
+      - ./turn-certs:/certs:ro
+    tmpfs:
+      - /tmp:mode=1777,size=16m
+      - /var/lib/coturn:mode=1777,size=16m
+    restart: unless-stopped
+    read_only: true
+
+volumes:
+  caddy_data:
+  caddy_config:
