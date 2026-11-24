@@ -58,6 +58,7 @@
       "!**/._*",
       "!node_modules/node-pty/{src,scripts,typings,deps,third_party,build}/**/*",
       "!node_modules/node-pty/prebuilds/{darwin-x64,win32-arm64}/**/*",
+      "!node_modules/node-pty/prebuilds/!(*-${arch})/**/*",
       "!node_modules/node-pty/prebuilds/**/*.pdb",
       "!node_modules/node-pty/lib/**/*.test.js",
       "!node_modules/{@xterm/**,node-pty}/**/*.map",
@@ -78,7 +79,6 @@
       }
     ],
     "mac": {
-      "files": ["!node_modules/node-pty/prebuilds/win32-x64/**/*"],
       "target": [
         {
           "target": "dmg",
@@ -113,7 +113,6 @@
       "sign": "scripts/sign-macos.cjs"
     },
     "win": {
-      "files": ["!node_modules/node-pty/prebuilds/darwin-arm64/**/*"],
       "target": [
         {
           "target": "nsis",
